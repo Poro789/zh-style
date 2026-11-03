@@ -55,13 +55,17 @@ python tools/check_zh.py --rules          # 打印全部规则及出处
 本仓库文档里也引用了反面例子。已改成行内代码的不计入；仍写在引号里的原文例句会计入，例如 `rules/华为产品手册中文写作规范-要点.md:174` 引用的「计费策略：表示计费：1，表示不计费：2」。`samples/bad-example.md` 是故意写坏的测试输入，读数高属预期。判读顺序：先看目标文档的 `error`，再看 `warn`；`hint` 只在写对外文档时处理。
 
 
-从 PDF 重新提取文本（只在没有 pdftotext / pypdf 时用）：
+从 PDF 重新提取文本：
 
 ```
-python tools/pdf2text.py "references/产品手册中文写作规范.pdf" -o "extracted/产品手册中文写作规范.raw.txt"
+python tools/extract_pdf.py "references/产品手册中文写作规范.pdf"
+python tools/extract_pdf.py <pdf> --force pypdf      # 指定工具
+python tools/pdf2text.py <pdf> <out.txt>             # 纯标准库后备（两个参数，无 -o）
 ```
 
-`pdf2text.py` 处理 Type0/Identity-H 与简单字体两类，靠 ToUnicode 映射中文；已知限制见文件头注释。
+`extract_pdf.py` 按 `pdftotext` → `pypdf` → `pdf2text.py` 顺序自动选择，输出写到 `extracted/<名>.<工具>.txt`，不覆盖别的工具结果。本机已装：poppler 25.07.0（`winget install --id oschwartz10612.Poppler`）、pypdf 6.21.4（miniconda 里是 6.14.2）。winget 只把 poppler 的 bin 加到用户 PATH，安装前就在跑的进程取不到，脚本会按绝对路径兜底。
+
+三方对同一份 PDF 的读数：`pdftotext` 41403 字符、`pypdf` 41489 字符、`pdf2text.py` 41982 字符；汉字数一致（正文 15560），自写版多出的 118 字全是页脚「第」「页」。`pdf2text.py` 处理 Type0/Identity-H 与简单字体两类，靠 ToUnicode 映射中文，已知限制见文件头注释。
 
 ## 更新来源
 

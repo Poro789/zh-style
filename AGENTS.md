@@ -9,9 +9,10 @@ python tools/check_zh.py .                 # 检查全仓库（samples/bad-examp
 python tools/check_zh.py <你的文档目录>     # 实际闸门用这个
 python tools/check_zh.py --rules           # 规则清单与出处
 python tools/check_zh.py <路径> --json     # 机器可读
+python tools/extract_pdf.py <pdf>          # PDF→UTF-8 文本，自动选 pdftotext / pypdf / 标准库后备
 ```
 
-没有构建步骤，没有测试依赖（纯标准库）。检查器退出码 1 表示有 `error`。
+检查器没有构建步骤、没有第三方依赖（纯标准库），退出码 1 表示有 `error`。PDF 提取依赖已装的 poppler 与 pypdf，缺了会退回标准库路径，不会崩。
 
 ## 写中文的硬规则（10 条，覆盖 80% 的「AI 味」）
 
@@ -32,7 +33,8 @@ python tools/check_zh.py <路径> --json     # 机器可读
 
 ## 不可破坏的约定
 
-- 不引入第三方依赖。检查器与 PDF 提取器只用标准库（`re`、`zlib`、`json`、`argparse`、`pathlib`）。不要装 pypdf、requests、rich。
+- `tools/check_zh.py` 只用标准库（`re`、`zlib`、`json`、`argparse`、`pathlib`），不要给它加依赖。
+- PDF 提取按 `pdftotext`（poppler 25.07.0，winget 安装）→ `pypdf`（已装 6.21.4）→ `tools/pdf2text.py`（纯标准库后备）的顺序自动选择，`tools/extract_pdf.py` 是入口。winget 只把 poppler 的 bin 加进用户 PATH，已在运行的进程取不到；取不到时按 `extract_pdf.py` 里的 `POPPLER_GLOBS` 绝对路径调用。
 - `references/`、`extracted/`、`document-style-guide/` 是上游原文，只读。要改观点写在 `rules/` 下，并标清是本仓库的判断。
 - 检查器只报不改，禁止给它加自动改写模式。
 - 新增规则必须带 `ref` 字段写明出处（华为章节号 / ruanyf 文件名 / 本仓库清单编号），并在 `--rules` 输出里可见。没有出处的规则不要加，避免把个人口味变成闸门。
