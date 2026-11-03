@@ -158,11 +158,22 @@ def skip_range(masked: str, hit) -> bool:
 MASK_RES = [
     re.compile(r"^```.*$|^~~~.*$"),                      # 由 fence 状态处理
     re.compile(r"`[^`\n]*`"),                            # 行内代码
+    # 「…」内超过 25 字的内容按引文处理：规范文档要引用上游反例，那些长句不代表本文写法
+    re.compile(r"「[^」\n]{25,}」"),
     re.compile(r"https?://\S+|www\.\S+"),
     re.compile(r"(?<![\w])[\w./\\-]*\.(?:md|py|pdf|txt|json|ya?ml|js|ts|bat|sh|csv|xlsx|docx)\b"),
     re.compile(r"\]\([^)\n]*\)"),                        # markdown 链接目标
     re.compile(r"^\s{0,3}[-*+]\s+\[[ xX]\]"),
 ]
+
+
+TOKEN_RES = re.compile(r"[\u4e00-\u9fff]|[A-Za-z0-9_.\-/]+")
+
+
+def width(s: str) -> int:
+    """句长口径：汉字按字计，连续的拉丁字母/数字串按 1 计，标点不计。
+    DSG 与华为的阈值（20 字／100 字）说的是中文正文；混排文本按字符数会虚高。"""
+    return len(TOKEN_RES.findall(s))
 
 
 def mask_line(line: str) -> str:
@@ -232,12 +243,14 @@ def check_text(path: str, text: str, min_level: int):
                     rid == "misprint" and hit.group(0) in MISTYPES) else msg
                 add(lvl, rid, i, hit.start() + 1, note, raw, ref)
 
-        # 句子级规则
-        col = 0
-        for sent in re.split(rf"(?<=[。！？；{chr(0xff1b)}])", m):
-            if sent:
-                sentences.append((i, col, sent))
-            col += len(sent)
+        # 句子级规则。表格单元格按片段写（华为 2.8：单元格 ≤6 行、不写整句），
+        # 所以表格行不套用正文的句长与构件长度规则。
+        if not re.match(r"^\s*\|", raw):
+            col = 0
+            for sent in re.split(rf"(?<=[。！？；{chr(0xff1b)}])", m):
+                if sent:
+                    sentences.append((i, col, sent))
+                col += len(sent)
 
     if para_start is not None and (para_lines > 7 or para_chars > 400):
         add("warn", "paragraph-long", para_start, 1,
@@ -245,14 +258,27 @@ def check_text(path: str, text: str, min_level: int):
             lines[para_start - 1], "华为 2.4")
 
     for lineno, col, sent in sentences:
-        n = len(re.sub(r"\s", "", sent))
+        n = width(sent)
         if n > 100:
             add("warn", "long-sentence", lineno, col + 1,
                 f"句子 {n} 字（建议 ≤100 字 / 3 行），拆成简单句或改项目列表", sent, "华为 2.5")
-        commas = sent.count("，")
-        if commas >= 5:
-            add("warn", "comma-chain", lineno, col + 1,
-                f"一句里 {commas} 个逗号（一逗到底），按语义断句", sent, "华为 3.2")
+        # 构件（逗号之间的一段）长度。DSG 文本·句子(1)：≤20 字可接受，20–29 尚可，
+        # 30–39 要求语义明确无歧义，>40 任何情况都不接受。
+        base = col
+        for part in re.split(r"[，,]", sent):
+            L = width(part)
+            dun = part.count("、")
+            if L >= 30 and dun >= 3:
+                # 并列项堆在一句里：长度不是问题，问题是没有用项目列表（华为 2.6）
+                add("hint", "clause-enum", lineno, base + 1,
+                    f"{dun + 1} 个并列项挤在一句（{L} 字），改项目列表", part, "华为 2.6")
+            elif L > 40:
+                add("error", "clause-long", lineno, base + 1,
+                    f"构件 {L} 字（>40 字任何情况都不接受），按语义拆句", part, "DSG 文本·句子(1)")
+            elif L >= 30:
+                add("warn", "clause-long", lineno, base + 1,
+                    f"构件 {L} 字（30–39 字要求语义明确、不会误解），建议拆到 20 字内", part, "DSG 文本·句子(1)")
+            base += len(part) + 1
 
     return findings
 
@@ -300,7 +326,8 @@ def main(argv=None):
         print(f"{'规则':22} {'级别':6} {'出处':34} 说明")
         for rid, lvl, _, msg, ref in COMPILED:
             print(f"{rid:22} {lvl:6} {ref:34} {msg}")
-        print(f"\n句子级：long-sentence / comma-chain；段落级：paragraph-long（华为 2.4/2.5）")
+        print("\n句子级：long-sentence（华为 2.5，>100 字）、clause-long（DSG 文本·句子(1)，构件 >40 error / 30–39 warn）、clause-enum（华为 2.6，≥4 个并列项挤在一句）；段落级：paragraph-long（华为 2.4）")
+        print("口径：汉字按字计、连续拉丁词按 1 计、标点不计；表格行不套用句长规则（华为 2.8 单元格按片段写）；「…」内超过 25 字按引文屏蔽")
         return 0
 
     exts = {e.strip() if e.startswith(".") else "." + e.strip() for e in a.ext.split(",")}
