@@ -1,0 +1,5 @@
+# 上游仓库的完整克隆（自带 .git 与 remote），不纳入本仓库
+document-style-guide/
+
+__pycache__/
+*.pyc
