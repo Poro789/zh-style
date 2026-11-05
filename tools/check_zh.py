@@ -30,6 +30,9 @@ from pathlib import Path
 CJK = "\u4e00-\u9fff\u3400-\u4dbf"
 FW = "\u3000-\u303f\uff00-\uffef\u2018-\u201d\u2026"
 CJKT = CJK + FW
+# 正文级规则（段落长、句长、构件长）只适用于散文文件。.md/.txt 之外多是配置或代码：
+# 结构行会冒充段落，英文行会被套上中文阈值（2026-11-05 修订，见 README 口径节）。
+PROSE_EXTS = {".md", ".markdown", ".txt"}
 
 # ---------------------------------------------------------------- 词表
 
@@ -169,6 +172,12 @@ MASK_RES = [
 
 TOKEN_RES = re.compile(r"[\u4e00-\u9fff]|[A-Za-z0-9_.\-/]+")
 
+# 代码与配置文件里引号内的内容是数据，不是正文：规则表自己的正则和提示词会被本工具
+# 的词表命中。注释仍然检查（2026-11-05 修订）。
+CODE_MASK_RES = [
+    re.compile(r"\"[^\"]*\"|'[^']*'"),
+]
+
 
 def width(s: str) -> int:
     """句长口径：汉字按字计，连续的拉丁字母/数字串按 1 计，标点不计。
@@ -176,10 +185,10 @@ def width(s: str) -> int:
     return len(TOKEN_RES.findall(s))
 
 
-def mask_line(line: str) -> str:
+def mask_line(line: str, extra=()) -> str:
     """把代码/URL/文件名等区域替换为等长空格，保持列号不变。"""
     out = list(line)
-    for rx in MASK_RES[1:]:
+    for rx in MASK_RES[1:] + list(extra):
         for m in rx.finditer(line):
             for i in range(m.start(), m.end()):
                 out[i] = " "
@@ -190,6 +199,8 @@ def mask_line(line: str) -> str:
 
 def check_text(path: str, text: str, min_level: int):
     findings = []
+    prose = Path(path).suffix.lower() in PROSE_EXTS
+    cjk_rx = re.compile(rf"[{CJK}]")
 
     def add(lvl, rid, lineno, col, msg, snippet, ref):
         if LEVELS[lvl] < min_level:
@@ -210,7 +221,7 @@ def check_text(path: str, text: str, min_level: int):
 
     def flush_para(at):
         nonlocal para_start, para_lines, para_chars
-        if para_start is not None and (para_lines > 7 or para_chars > 400):
+        if prose and para_start is not None and (para_lines > 7 or para_chars > 400):
             add("warn", "paragraph-long", para_start, 1,
                 f"段落 {para_lines} 行 / {para_chars} 字：一个段落只讲一个中心句，建议 ≤4 行、不超过 7 行",
                 lines[para_start - 1], "华为 2.4")
@@ -223,7 +234,7 @@ def check_text(path: str, text: str, min_level: int):
             continue
         if in_fence:
             continue
-        m = mask_line(raw)
+        m = mask_line(raw, () if prose else CODE_MASK_RES)
         if raw.strip():
             if listish(raw):            # 列表、表格、标题、引用块不按段落计数
                 flush_para(i)
@@ -231,7 +242,7 @@ def check_text(path: str, text: str, min_level: int):
                 if para_start is None:
                     para_start = i
                 para_lines += 1
-                para_chars += len(raw.strip())
+                para_chars += width(m)  # 与句长同一口径：拉丁词按 1 计（2026-11-05 修订）
         else:
             flush_para(i)
 
@@ -245,14 +256,15 @@ def check_text(path: str, text: str, min_level: int):
 
         # 句子级规则。表格单元格按片段写（华为 2.8：单元格 ≤6 行、不写整句），
         # 所以表格行不套用正文的句长与构件长度规则。
-        if not re.match(r"^\s*\|", raw):
+        # 句子级规则只收中文行：英文行套中文句长阈值是类别错误（2026-11-05 修订）。
+        if prose and not re.match(r"^\s*\|", raw) and cjk_rx.search(m):
             col = 0
             for sent in re.split(rf"(?<=[。！？；{chr(0xff1b)}])", m):
                 if sent:
                     sentences.append((i, col, sent))
                 col += len(sent)
 
-    if para_start is not None and (para_lines > 7 or para_chars > 400):
+    if prose and para_start is not None and (para_lines > 7 or para_chars > 400):
         add("warn", "paragraph-long", para_start, 1,
             f"段落 {para_lines} 行 / {para_chars} 字：建议 ≤4 行、不超过 7 行",
             lines[para_start - 1], "华为 2.4")
@@ -328,6 +340,7 @@ def main(argv=None):
             print(f"{rid:22} {lvl:6} {ref:34} {msg}")
         print("\n句子级：long-sentence（华为 2.5，>100 字）、clause-long（DSG 文本·句子(1)，构件 >40 error / 30–39 warn）、clause-enum（华为 2.6，≥4 个并列项挤在一句）；段落级：paragraph-long（华为 2.4）")
         print("口径：汉字按字计、连续拉丁词按 1 计、标点不计；表格行不套用句长规则（华为 2.8 单元格按片段写）；「…」内超过 25 字按引文屏蔽")
+        print("口径（2026-11-05 修订）：正文级规则（paragraph-long、long-sentence、clause-long、clause-enum）只套在 .md/.markdown/.txt 的中文行上；配置与代码文件只跑词法级规则")
         return 0
 
     exts = {e.strip() if e.startswith(".") else "." + e.strip() for e in a.ext.split(",")}
