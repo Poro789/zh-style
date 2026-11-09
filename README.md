@@ -46,7 +46,7 @@ python tools/check_zh.py docs/README.md --json
 python tools/check_zh.py --rules          # 打印全部规则、清单编号与出处
 ```
 
-退出码：有 `error` 级问题返回 1，可用于 CI 闸门（`--no-gate` 关闭）。级别分三档：`error` 明确违反规范、`warn` 需人判断、`hint` 风格提示。
+退出码：有 `error` 级问题返回 1，可用于 CI 闸门（`--no-gate` 关闭）。文本输出末尾固定打印一段「检查器判不了的 8 类」自查清单加两个自查测试（删修饰、回译）：未覆盖的条款不产生报错，绿色读数容易被当成全量校验的凭证。CI 里用 `--no-residual` 关掉这段。级别分三档：`error` 明确违反规范、`warn` 需人判断、`hint` 风格提示。
 
 `--rules` 的「清单」列把每条规则映射到 `rules/AI怪中文-常见病句清单与修法.md` 的 `R-xx` 编号，报错可以直接反查改法。空白表示该条没有清单编号。
 

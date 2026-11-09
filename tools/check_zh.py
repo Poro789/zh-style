@@ -201,6 +201,21 @@ COMPILED = [(rid, lvl, re.compile(rx), msg, ref, RNO.get(rid, ""), rid in PROSE_
 LEVELS = {"error": 3, "warn": 2, "hint": 1}
 EXCLAIM_PILE = re.compile(r"[！]{2,}|[！!]![！!]")
 
+# 检查器判不了的类别。跑完就打印：未覆盖的条款不产生任何信号，
+# 「0 error」与「全量校验过」在输出上无法区分，绿色读数会被当成交付凭证。
+RESIDUAL = """检查器判不了的 8 类，逐条自查（改法见 rules/AI怪中文-常见病句清单与修法.md）：
+  1 段落一个中心句、放在段首；并列信息改项目列表，别用「同时」「而」串成长句
+  2 列表项彼此不重叠、合起来穷尽；需要兜底就补「其他」并说明含义
+  3 指代唯一：其、该、此、这 可能指两个对象时，改回名词
+  4 定语与名词不堆叠：配置管理界面 → 用于配置管理的界面（华为 2.5 歧义三型）
+  5 简单句优先；不用双重否定；「对于…来说」「在…的情况下」删冗余
+  6 开头直接进入事实，结尾只给新信息；删「综上所述」「值得注意的是」「首先其次最后」
+  7 术语与动词全文统一（单击／选择／输入）；缩略语首次出现就解释
+  8 举例合规：私网 IP、0755-12345678、A 市、王先生，不用真实人名地名
+两个自查测试：
+  删修饰：删掉全部程度词与套话，信息量不变，那些词就是噪声。
+  回译：能逐词译成英文、中文却读着别扭，是翻译腔，改句子结构而不是换词。"""
+
 REF_CTX = re.compile(
     r"(?:表|图|式|章节|章|节|页|附录|版本|型号|步骤|款|序号|编号|标准|代号|"
     r"GB/T|GB|ISO|IEC|RFC|YD|DOI)\s*$")
@@ -529,6 +544,8 @@ def main(argv=None):
     ap.add_argument("--exclude", action="append", metavar="GLOB",
                     help="排除路径（可多次）。默认已排除 extracted/ 与 document-style-guide/（上游原文）")
     ap.add_argument("--no-gate", action="store_true", help="有 error 也返回 0")
+    ap.add_argument("--no-residual", action="store_true",
+                    help="不打印「检查器判不了的 8 类」清单（默认打印，防止 0 error 被当成全合规）")
     a = ap.parse_args(argv)
 
     if a.rules:
@@ -579,6 +596,8 @@ def main(argv=None):
             if len(items) > 12:
                 print(f"  …另 {len(items) - 12} 处")
         print(f"\n扫描 {scanned} 个文件：error {counts['error']}、warn {counts['warn']}、hint {counts['hint']}")
+        if not a.no_residual:
+            print("\n" + RESIDUAL)
 
     return 1 if (counts["error"] and not a.no_gate) else 0
 
