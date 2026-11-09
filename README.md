@@ -92,9 +92,11 @@ python tools/extract_pdf.py <pdf> --force pypdf      # 指定工具
 python tools/pdf2text.py <pdf> <out.txt>             # 纯标准库后备（两个参数，无 -o）
 ```
 
-`extract_pdf.py` 按 `pdftotext` → `pypdf` → `pdf2text.py` 顺序自动选择，输出写到 `extracted/<名>.<工具>.txt`，不覆盖别的工具结果。本机已装：poppler 25.07.0（`winget install --id oschwartz10612.Poppler`）、pypdf 6.21.4（miniconda 里是 6.14.2）。winget 只把 poppler 的 bin 加到用户 PATH。安装前就在跑的进程取不到它，脚本会按绝对路径兜底。
+`extract_pdf.py` 按 `pdftotext` → `pypdf` → `pdf2text.py` 顺序自动选择，输出写到 `extracted/<名>.<工具>.txt`，不覆盖别的工具结果。
 
-三方对同一份 PDF 的读数：`pdftotext` 41,403 字符、`pypdf` 41,489 字符、`pdf2text.py` 41,982 字符。汉字数一致，正文 15,560 字。`pdf2text.py` 比 `pdftotext` 多出的 118 字全是页脚的「第」「页」。`pdf2text.py` 处理 Type0/Identity-H 与简单字体两类，靠 ToUnicode 映射中文，已知限制见文件头注释。
+本机已装 poppler 25.07.0（`winget install --id oschwartz10612.Poppler`）与 pypdf 6.21.4（miniconda 里是 6.14.2）。winget 只把 poppler 的 bin 加到用户 PATH，安装前就在跑的进程取不到它，脚本会按绝对路径兜底。
+
+三方对同一份 PDF 的读数：`pdftotext` 41,403 字符、`pypdf` 41,489 字符、`pdf2text.py` 41,982 字符。汉字数一致，正文 15,560 字。`pdf2text.py` 比 `pdftotext` 多出的 118 字全是页脚的「第」「页」。`pdf2text.py` 处理 Type0/Identity-H 与简单字体两类，靠 ToUnicode 映射中文。已知限制见文件头注释。
 
 ## 更新来源
 
