@@ -43,16 +43,22 @@ zh-style-kit/
 python tools/check_zh.py .
 python tools/check_zh.py rules/ samples/ --level warn
 python tools/check_zh.py docs/README.md --json
-python tools/check_zh.py --rules          # 打印全部规则及出处
+python tools/check_zh.py --rules          # 打印全部规则、清单编号与出处
 ```
 
 退出码：有 `error` 级问题返回 1，可用于 CI 闸门（`--no-gate` 关闭）。级别分三档：`error` 明确违反规范、`warn` 需人判断、`hint` 风格提示。
 
-### 读数怎么读
+`--rules` 的「清单」列把每条规则映射到 `rules/AI怪中文-常见病句清单与修法.md` 的 `R-xx` 编号，报错可以直接反查改法。空白表示该条没有清单编号。
+
+## 读数怎么读
 
 检查器把代码块、行内代码、URL、文件名替换成等长空格再判定，所以这些区域不计入。「…」内超过 25 字按引文处理。
 
 句子级规则有三条：`long-sentence`（整句 >100 字，华为 2.5）、`clause-long`（逗号之间的构件 >40 字报 `error`、30～39 字报 `warn`，出处 DSG 文本·句子(1)）、`clause-enum`（4 个以上并列项挤在一句，建议改项目列表，华为 2.6）。长度口径：汉字按字计、连续拉丁词按 1 计、标点不计，否则混排文本会虚高。表格行不套用句长规则，因为华为 2.8 规定单元格按片段写。默认排除 `extracted/` 与 `document-style-guide/`：上游原文有 OCR 换行和 2003 年的旧排版，扫它们的读数没有意义。
+
+并列逗号的判定口径（`dunhao-comma`、`latin-enum-comma`）：先把整行的半角逗号按左右构件串成并列链，链上左右都是汉字的逗号报 `error`；含拉丁词的链要求整行有中文、且并列 ≥3 项才报 `warn`。千分位（`10,200`）、缩写后的逗号（`e.g., foo`）、纯英文整句里的逗号都不算并列。同一位置不再重复报 `halfwidth-punct`，感叹号连用时只报 `exclaim-pile` 一次。
+
+标题层级规则（`heading-skip`、`heading-orphan`）只跑 `.md`，跳过 YAML front matter 与代码块：前者查相邻标题跳级，后者查某个标题下只有一个直接子标题。
 
 正文级规则（`paragraph-long`、`long-sentence`、`clause-long`、`clause-enum`）只套在 `.md`/`.markdown`/`.txt` 的中文行上。配置与代码文件只跑词法级规则，引号内的字符串按数据处理，注释仍然检查。这两条闸门是 2026-11-05 加的：扫 YAML 配置时，结构行会被当成正文段落，英文行会被套上中文句长阈值，噪声压过 signal。
 
