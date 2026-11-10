@@ -319,7 +319,7 @@ def enum_commas(masked: str):
 MASK_RES = [
     re.compile(r"^```.*$|^~~~.*$"),                      # 由 fence 状态处理
     re.compile(r"`[^`\n]*`"),                            # 行内代码
-    # 「…」内超过 25 字的内容按引文处理：规范文档要引用上游反例，那些长句不代表本文写法
+    # 引号内超过 25 字的内容按引文处理：规范文档要引用上游反例，那些长句不代表本文写法
     re.compile(r"「[^」\n]{25,}」"),
     re.compile(r"https?://\S+|www\.\S+"),
     re.compile(r"(?<![\w])[\w./\\-]*\.(?:md|py|pdf|txt|json|ya?ml|js|ts|bat|sh|csv|xlsx|docx)\b"),
@@ -335,6 +335,67 @@ TOKEN_RES = re.compile(r"[\u4e00-\u9fff]|[A-Za-z0-9_.\-/]+")
 CODE_MASK_RES = [
     re.compile(r"\"[^\"]*\"|'[^']*'"),
 ]
+
+# .py 专用（2026-11-10 修订）：docstring/注释里半角括号（含花括号）的段是代码写法
+# （(a, b)、[(k, v)]、{码位: 字符}），其中的半角逗号冒号不是中文标点，屏蔽到闭合括号为止。
+PY_PAREN = re.compile(r"[\[({][^)\]}\n]*[)\]}]")
+# --word 形式是 CLI 标志（--dry）或 CSS 自定义属性（var(--rule)），不算拿双连字符冒充破折号。
+# 汉字直接跟在后面的仍然报。
+DASHFLAG = re.compile(r"(?<![-\w一-鿿])-{2,3}[A-Za-z]")
+
+
+def py_prose_lines(text: str):
+    """把 .py 的 docstring 与注释抽成行号对齐的行列表，其余行置空。
+
+    词法级规则只跑在这些文本上：dict 冒号、CSS 变量、元组逗号、argv 切片是代码语法，
+    不是中文写法问题（2026-11-10 修订；research 库 13 个脚本实测误报率约 95%）。
+    docstring 判定 = 逻辑行起点的 STRING token。tokenize 失败返回 None，退回整文件扫描。
+    """
+    import io
+    import tokenize
+    try:
+        toks = list(tokenize.generate_tokens(io.StringIO(text).readline))
+    except Exception:
+        return None
+    lines = text.splitlines()
+    buf = [[] for _ in lines]
+
+    def put(lineno, col, s):
+        if not 1 <= lineno <= len(buf):
+            return
+        row = buf[lineno - 1]
+        if col > len(row):
+            row.extend(" " * (col - len(row)))
+        end = col + len(s)
+        if end > len(row):
+            row.extend(" " * (end - len(row)))
+        row[col:end] = list(s)
+
+    prev_sig = None  # 最近一个非注释、非行边界的 token；None = 模块开头
+    for t in toks:
+        if t.type == tokenize.COMMENT:
+            put(t.start[0], t.start[1], t.string)
+            continue
+        if t.type == tokenize.NEWLINE:
+            prev_sig = t
+            continue
+        if t.type in (tokenize.NL, tokenize.INDENT,
+                      tokenize.DEDENT, tokenize.ENCODING):
+            continue
+        if t.type == tokenize.STRING and (prev_sig is None or prev_sig.type == tokenize.NEWLINE):
+            s = t.string
+            mm = re.match(r"^[A-Za-z]*(\"\"\"|'''|\"|')", s)
+            if mm:
+                body = s[len(mm.group(0)):]
+                for q in ('"""', "'''", '"', "'"):
+                    if body.endswith(q):
+                        body = body[:-len(q)]
+                        break
+                first_col = t.start[1] + len(mm.group(0))
+                for k, seg in enumerate(body.split("\n")):
+                    put(t.start[0] + k, first_col if k == 0 else 0, seg)
+        prev_sig = t
+    return ["".join(row).rstrip() for row in buf]
 
 
 def width(s: str) -> int:
@@ -359,6 +420,11 @@ def check_text(path: str, text: str, min_level: int):
     findings = []
     prose = Path(path).suffix.lower() in PROSE_EXTS
     md = Path(path).suffix.lower() in (".md", ".markdown")
+    py = Path(path).suffix.lower() == ".py"
+    if py:
+        extracted = py_prose_lines(text)
+        if extracted is not None:
+            text = "\n".join(extracted)
     cjk_rx = re.compile(rf"[{CJK}]")
 
     def add(lvl, rid, lineno, col, msg, snippet, ref=""):
@@ -403,7 +469,8 @@ def check_text(path: str, text: str, min_level: int):
             continue
         if in_fence:
             continue
-        m = mask_line(raw, () if prose else CODE_MASK_RES)
+        extra = () if prose else CODE_MASK_RES + ([PY_PAREN] if py else [])
+        m = mask_line(raw, extra)
         if md:
             hm = HEADING.match(raw)
             if hm:
@@ -424,6 +491,7 @@ def check_text(path: str, text: str, min_level: int):
         enum_cjk, enum_wide = enum_commas(m)
         enum_idx = set(enum_cjk) | set(enum_wide)
         pile_idx = {p for h in EXCLAIM_PILE.finditer(m) for p in range(h.start(), h.end())}
+        flag_idx = {p for h in DASHFLAG.finditer(m) for p in range(h.start(), h.end())}
 
         for rid, lvl, rx, msg, ref, rno, prose_only in COMPILED:
             if prose_only and not prose:
@@ -435,14 +503,19 @@ def check_text(path: str, text: str, min_level: int):
                     continue
                 if rid == "exclaim-soft" and hit.start() in pile_idx:
                     continue
+                if rid == "double-hyphen":
+                    d = hit.group(0).find("--")
+                    if d >= 0 and (hit.start() + d) in flag_idx:
+                        continue
                 note = f"{msg}：{hit.group(0)} → {MISTYPES[hit.group(0)]}" if (
                     rid == "misprint" and hit.group(0) in MISTYPES) else msg
                 add(lvl, rid, i, hit.start() + 1, note, raw, ref)
 
         for col in enum_cjk:
             add("error", "dunhao-comma", i, col + 1, LMSG["dunhao-comma"], raw)
-        for col in enum_wide:
-            add("warn", "latin-enum-comma", i, col + 1, LMSG["latin-enum-comma"], raw)
+        if prose:  # latin-enum-comma 在 PROSE_ONLY 里：代码行里的英文并列是语法，不是中文标点
+            for col in enum_wide:
+                add("warn", "latin-enum-comma", i, col + 1, LMSG["latin-enum-comma"], raw)
 
         # 句子级规则。表格单元格按片段写（华为 2.8：单元格 ≤6 行、不写整句），
         # 所以表格行不套用正文的句长与构件长度规则。
@@ -560,6 +633,7 @@ def main(argv=None):
         print("口径：汉字按字计、连续拉丁词按 1 计、标点不计；表格行不套用句长规则（华为 2.8 单元格按片段写）；「…」内超过 25 字按引文屏蔽")
         print("口径（2026-11-05 修订）：正文级规则（paragraph-long、long-sentence、clause-long、clause-enum）只套在 .md/.markdown/.txt 的中文行上；配置与代码文件只跑词法级规则")
         print("口径（2026-11-10 新增）：标题层级规则只跑 .md，跳过 YAML front matter 与代码块；并列逗号按整行构件判定，千分位与 e.g., 不算并列")
+        print("口径（2026-11-10 新增）：.py 用 tokenize 抽出 docstring 与注释后只查这些文本；docstring 里半角括号段按代码写法屏蔽；--word 形式的双连字符（CLI 标志、CSS 变量）不算破折号误用")
         return 0
 
     exts = {e.strip() if e.startswith(".") else "." + e.strip() for e in a.ext.split(",")}
