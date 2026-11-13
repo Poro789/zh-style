@@ -594,7 +594,7 @@ def iter_files(targets, exts, excludes):
             print(f"跳过（不存在）: {t}", file=sys.stderr)
 
 
-DEFAULT_EXCLUDES = ["extracted/*", "document-style-guide/*", ".git/*"]
+DEFAULT_EXCLUDES = ["extracted/*", "document-style-guide/*", ".git/*", "feedback/*"]
 
 
 def is_excluded(p: Path, pats) -> bool:
@@ -615,7 +615,7 @@ def main(argv=None):
                     help="最低报告级别（默认 hint 全报）")
     ap.add_argument("--ext", default=".md,.txt", help="扫描的扩展名（默认 .md,.txt）")
     ap.add_argument("--exclude", action="append", metavar="GLOB",
-                    help="排除路径（可多次）。默认已排除 extracted/ 与 document-style-guide/（上游原文）")
+                    help="排除路径（可多次）。默认已排除 extracted/、document-style-guide/（上游原文）与 feedback/（检查记录引用原文）")
     ap.add_argument("--no-gate", action="store_true", help="有 error 也返回 0")
     ap.add_argument("--no-residual", action="store_true",
                     help="不打印「检查器判不了的 8 类」清单（默认打印，防止 0 error 被当成全合规）")
