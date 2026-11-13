@@ -31,12 +31,15 @@ python tools/extract_pdf.py <pdf>          # PDF→UTF-8 文本，自动选 pdft
 
 写完先跑 `python tools/check_zh.py <路径>`，把 `error` 清零，再逐条过 `rules/` 里 A～F 六类（检查器管不到的：结构套话、列表重叠、术语一致、举例合规）。改写对照见 `samples/bad-example.md` → `samples/good-example.md`，可直接当 few-shot 示例喂给模型。
 
+检查发现系统性误判或规则缺口时，按 `feedback/检查记录-模板.md` 写一份检查记录，存 `feedback\`。触发条件有三类：同一规则在同库误判 ≥2 处；规则没抓到的新特征且带反例；检查器异常且定位了根因。出口：A 改 `tools/check_zh.py` 口径，B 出处可查证才进检查器，C 留在记录，D 进 `tools\`。实施完回填记录的处置字段。
+
 ## 不可破坏的约定
 
 - `tools/check_zh.py` 只用标准库（`re`、`zlib`、`json`、`argparse`、`pathlib`），不要给它加依赖。
 - PDF 提取按 `pdftotext`（poppler 25.07.0，winget 安装）→ `pypdf`（已装 6.21.4）→ `tools/pdf2text.py`（纯标准库后备）的顺序自动选择，`tools/extract_pdf.py` 是入口。winget 只把 poppler 的 bin 加进用户 PATH，已在运行的进程取不到；取不到时按 `extract_pdf.py` 里的 `POPPLER_GLOBS` 绝对路径调用。
 - `references/`、`extracted/`、`document-style-guide/` 是上游原文，只读。要改观点写在 `rules/` 下，并标清是本仓库的判断。
 - 检查器只报不改，禁止给它加自动改写模式。
+- 检查个案记录存 `feedback\`，引用原文，默认不进检查器扫描；`rules\` 只放规范类文档。
 - 新增规则必须带 `ref` 字段写明出处（华为章节号 / ruanyf 文件名 / 本仓库清单编号），并在 `--rules` 输出里可见。没有出处的规则不要加，避免把个人口味变成闸门。
 - 大数字分节存在上游冲突：本仓库默认半角逗号 `1,000`；沿用华为排版的文档用半角空格 `2 345 567 456`。同一篇文档只用一种。
 - 写文件用 UTF-8。本机 PowerShell 是 5.1，`Set-Content`/`Out-File` 会把中文写成 GBK 乱码；改文本一律用编辑工具或 Python。
