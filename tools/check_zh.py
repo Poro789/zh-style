@@ -109,14 +109,14 @@ RULES = [
      "“进行＋动词”冗余，直接用动词（对系统进行检查 → 检查系统）", "ruanyf text.md / 华为 2.5"),
     ("bei-passive", "warn",
      BEI,
-     "技术说明中少用“被”字句，改主动句（该功能被用于… → 该功能用于…）", "ruanyf text.md"),
+     "技术说明中少用“被”字句，改主动句（该功能被用于… → 该功能用于…）", "DSG 写作风格(1) / 华为 2.4 / 分级表 3"),
     # 白名单只覆盖 12 个高频动词，「被强调」「被整编」这类一律放过（2026-11-13 记录 A4：
     # mechanisms.md 里 24 行「被＋汉字」命中 0）。规范口径是「主动语态优先」（分级表第 3 条），
     # 属优先而非禁止，所以兜底命中降为 hint，不污染 warn 计数。与 bei-passive 同位置不重复报。
     ("bei-passive-open", "hint",
      rf"被[{CJK}]{{1,4}}",
      "「被＋动词」白名单外的形式：多数应改主动句；施事确实无关时可保留",
-     "DSG 写作风格(1) 主动语态优先（漏报兜底，故为 hint）"),
+     "DSG 写作风格(1) / 华为 2.4 / 分级表 3"),
     ("tongguo-shi", "warn",
      rf"通过[^。；\n]{{2,40}}?使[^。；\n]{{1,25}}?(?:能够|可以|得以|得到|更加|更为|实现)",
      "“通过…使…”句式常吞掉主语，检查句子有没有施事", "华为 2.5"),
@@ -200,6 +200,13 @@ FILE_RULES = [
      "同一文档 ≥2 种日期写法（2026-02-15 / 2026/2/15 / 20260222 / 2026年2月15日），统一为 YYYY-MM-DD"),
     ("percent-form-mixed", "hint", "", "ruanyf text.md（半角的百分号，视同阿拉伯数字）",
      "同一文档混用全角％与半角%，统一为半角%"),
+    # 默认关（2026-11-13 research 库检查记录 B1）。出处查到了，是华为 2.11，不是记录里猜的 2.1：
+    # 「正文中第一次出现的缩略语，必须进行解释」，6.1 重申；格式 VPN（Virtual Private Network）。
+    # 实测误报比撑不起默认闸门：kit 侧 11 条候选 2 条真命中，research 侧 122 条几乎全是该库自造的
+    # 命题代号（CP、UJB、VRP）与厂商名（SVS、UMIK），白名单补不完。华为 2.11 的前提是产品手册配
+    # 缩略语表，台账与工程文档不满足。所以规则照加、默认关，写交付手册时 --enable 打开。
+    ("acronym-unexplained", "hint", "E·术语", "华为 2.11（6.1 重申）",
+     "ASCII 缩略语首次出现未就地解释：写 `VPN（Virtual Private Network）` 或 `OCR（光学字符识别）`"),
 ]
 
 # --rules 的「清单」列：对应 rules/AI怪中文-常见病句清单与修法.md 的 R-xx 编号。
@@ -251,7 +258,7 @@ COMPILED = [(rid, lvl, re.compile(rx), msg, ref, RNO.get(rid, ""), rid in PROSE_
 LEVELS = {"error": 3, "warn": 2, "hint": 1}
 # 默认关闭的规则：中英文之间的空格交给 zhlint 这类排版工具前置处理，
 # 本检查器不接管（2026-11-13 决定，全量 1,683 条 hint 全是这一条）。
-DEFAULT_OFF = {"cjk-latin-space"}
+DEFAULT_OFF = {"cjk-latin-space", "acronym-unexplained"}
 _ENABLED_OFF = set()
 EXCLAIM_PILE = re.compile(r"[！]{2,}|[！!]![！!]")
 # 提交哈希、十六进制串：unit-symbol 里的 cc/db 等字样不是单位（2026-11-13 审计 A1）。
@@ -267,6 +274,7 @@ RESIDUAL = """检查器判不了的 8 类，逐条自查（改法见 rules/AI怪
   5 简单句优先；不用双重否定；「对于……来说」「在……的情况下」删冗余
   6 开头直接进入事实，结尾只给新信息；删「综上所述」「值得注意的是」「首先其次最后」
   7 术语与动词全文统一（单击／选择／输入）；缩略语首次出现就解释
+    （ASCII 大写串可用 --enable acronym-unexplained 代查；「O 层」这类单字母代号与中文自造代号仍靠人判）
   8 举例合规：私网 IP、0755-12345678、A 市、王先生，不用真实人名地名
 两个自查测试：
   删修饰：删掉全部程度词与套话，信息量不变，那些词就是噪声。
@@ -410,6 +418,10 @@ def in_enum(m: str, pos: int, end: int) -> bool:
         i -= 1
     prev = m[i] if i >= 0 else ""
     nxt = m[end] if end < len(m) else ""
+    # 行首没有前一个字符，prev 是空串；`"" in ENUM_BEFORE` 恒真，会把段首与列表项开头的
+    # 套话全部误判成清单项免检（套话最典型的位置正是段首）。空 prev 不算清单。
+    if not prev:
+        return False
     return prev in ENUM_BEFORE or nxt == "、"
 
 
@@ -525,6 +537,39 @@ def mask_line(line: str, extra=()) -> str:
     return "".join(out)
 
 
+# 缩略语（华为 2.11，默认关）：只认纯大写串，允许 / 与 - 并列（EXT/LEN/CS、PVQ-RR）。
+# 大小写混排的专名（PowerShell、ToUnicode）不是缩略语，不进候选。
+ACR_RX = re.compile(r"(?<![A-Za-z0-9])([A-Z]{2,6}(?:[/-][A-Z]{1,6})*)(?![A-Za-z0-9])")
+# 就地兑换：紧跟的括号里有中文说明或拉丁全称。OCR（光学字符识别）与 VPN（Virtual Private Network）都算，
+# 华为 2.11 只规定「必须解释」，中文说明同样合规。
+ACR_EXPLAIN = re.compile(rf"^\s*（(?:[^（）]*[{CJK}][^（）]*|[^（）]*[A-Za-z]{{2,}}[^（）]*)）")
+# 不要求解释的一类：计量单位、编码与格式、标准与机构号、计算机通用名。
+# 判据是「不解释也不会读错，读者按名字查得到」，不是「我觉得常见」。
+# 学术会议名（EMNLP）、厂商与产品名（SVS、UMIK）不收：2.11 要求解释，照报。
+ACR_STOP = {
+    # 单位与量
+    "KB", "MB", "GB", "TB", "PB", "MS", "HZ", "KHZ", "MHZ", "GHZ", "DB", "KM", "KG",
+    "MM", "CM", "ML", "KV", "VA", "WH", "RH", "RPM", "SPL", "FM", "AM",
+    # 编码、格式、协议
+    "UTF", "ASCII", "GBK", "GB2312", "BIG5", "HTML", "HTTP", "HTTPS", "URL", "URI",
+    "JSON", "CSV", "TSV", "XML", "YAML", "TOML", "PDF", "PNG", "JPG", "JPEG", "GIF",
+    "SVG", "XLSX", "XLS", "DOCX", "PPTX", "SRT", "API", "CLI", "GUI", "UI", "CSS",
+    "JS", "TS", "SQL", "IP", "DNS", "TLS", "SSL", "SSH", "FTP", "TCP", "UDP", "LAN",
+    "WIFI", "USB", "HDMI", "HDR", "RGB", "CMYK", "FAQ", "README", "INDEX", "AGENTS",
+    "TODO", "CHANGELOG", "LICENSE", "CACHE", "PATH", "NAME", "CODE", "DATA", "INFO",
+    "LOG", "TMP", "SRC", "LIB", "BIN", "DEV", "PROD", "TEST", "DRAFT", "WIP", "OK",
+    "ID", "NO", "TV", "AD", "BC", "VS", "ETC",
+    # 标准与机构号
+    "GB", "ISO", "IEC", "RFC", "ITU", "ANSI", "DIN", "ASTM", "DOI", "ISBN", "ISSN",
+    "USC", "EU", "UN", "NGO", "GDP", "CPI",
+    # 计算机通用名
+    "CI", "CD", "OCR", "SDK", "IDE", "OS", "PC", "CPU", "GPU", "RAM", "ROM", "SSD",
+    "HDD", "HPC", "VM", "CMD", "EXE", "DLL", "PID", "UUID", "MD5", "SHA",
+    "AI", "ML", "LLM", "NLP", "TTS", "STT", "ASR",
+    # 日期占位符
+    "YYYY", "MM", "DD", "HH",
+}
+
 # ---------------------------------------------------------------- 检查
 
 def check_text(path: str, text: str, min_level: int):
@@ -563,6 +608,7 @@ def check_text(path: str, text: str, min_level: int):
     headings = []   # (级别, 标题文字, 行号) —— 只有 .md 收集
     para_start, para_lines, para_chars = None, 0, 0
     pile = []  # 当前段落内套话命中：(行号, 列, 词)；段落 flush 时判定并在 ≥3 时报 error
+    acr_first = {}  # 缩略语首现：token → (行, 列, 原文)；首现就兑换的记 None，后续裸用免报
 
     def listish(line):
         """列表项、表格行、标题、引用块——不按段落计数。"""
@@ -614,6 +660,19 @@ def check_text(path: str, text: str, min_level: int):
         for qm in LEX_QUOTE.finditer(raw):
             quote_idx.update(range(qm.start(), qm.end()))
         bei_starts = {bm.start() for bm in BEI_RE.finditer(m)}
+        if prose:  # 缩略语首现收集（华为 2.11）：判定在文件末尾，产出仍走 add 的级别与默认关过滤
+            for am in ACR_RX.finditer(m):
+                if am.start() in quote_idx:
+                    continue  # 「UGC」这类被谈论的对象不是行文使用（与 A1 同一口径）
+                tok = am.group(1)
+                if tok in acr_first or tok in ACR_STOP:
+                    continue
+                if any(t in ACR_STOP for t in re.split(r"[/-]", tok)):
+                    continue
+                if ACR_EXPLAIN.match(m[am.end():am.end() + 80]):
+                    acr_first[tok] = None
+                else:
+                    acr_first[tok] = (i, am.start() + 1, raw)
         if md:
             hm = HEADING.match(raw)
             if hm:
@@ -764,6 +823,14 @@ def check_text(path: str, text: str, min_level: int):
     for lvl, rid, ln, col, msg, sn in file_hits:
         add(lvl, rid, ln, col, msg, sn)
 
+    # 缩略语（华为 2.11，默认关）：每个未兑换的只报首现一处，后续裸用不重复报。
+    for tok, v in acr_first.items():
+        if not v:
+            continue
+        ln, col, sn = v
+        add("hint", "acronym-unexplained", ln, col,
+            f"缩略语「{tok}」首次出现未就地解释：写「{tok}（全称或中文说明）」", sn)
+
     return findings
 
 
@@ -810,7 +877,7 @@ def main(argv=None):
     ap.add_argument("--exclude", action="append", metavar="GLOB",
                     help="排除路径（可多次）。默认已排除 extracted/、document-style-guide/（上游原文）与 feedback/（检查记录引用原文）")
     ap.add_argument("--enable", action="append", default=[], metavar="RULE",
-                    help="打开默认关闭的规则（默认关：cjk-latin-space）")
+                    help="打开默认关闭的规则（默认关：cjk-latin-space、acronym-unexplained）")
     ap.add_argument("--no-gate", action="store_true", help="有 error 也返回 0")
     ap.add_argument("--no-residual", action="store_true",
                     help="不打印「检查器判不了的 8 类」清单（默认打印，防止 0 error 被当成全合规）")
@@ -837,6 +904,7 @@ def main(argv=None):
         print("口径（2026-11-10 新增）：.py 用 tokenize 抽出 docstring 与注释后只查这些文本；docstring 里半角括号段按代码写法屏蔽；--word 形式的双连字符（CLI 标志、CSS 变量）不算破折号误用")
         print("口径（2026-11-13 新增，来自 11-13 检查记录，原文存仓外不入库）：HTML 注释整块屏蔽；「汉字1～4字—汉字1～4字」同形 ≥3 次视为术语连接号不报 dash-single；纯时间点冒号不报 colon-pile；含 ${ 或 HTML 标签起行的 JS 模板行跳过词法规则；≤6 字无逗号短行视为断段点；单文件默认 >1MB 跳过（--max-file-size）")
         print("口径（2026-11-13 第二批，来自 research 库检查记录）：「」『』“”与直引号内的内容不参与词法级规则（规范文本会引用它禁止的形式）；顿号 ≥3 且无句末标点的行视为列举清单，boilerplate／bei-passive／jinxing-nominal／fuzzy-word 不计；白名单外的「被＋汉字」由 bei-passive-open 兜底报 hint，与 bei-passive 同位置不重复报")
+        print("口径（2026-11-13 第三批，同一记录 B1）：缩略语首现未解释的出处核到华为 2.11（6.1 重申），不是记录里猜的 2.1；实测误报比撑不起默认闸门（本仓库 11 条候选 2 条真命中，research 库 122 条几乎全是该库自造的命题代号），所以规则照加、默认关，写交付手册时用 --enable acronym-unexplained 打开")
         return 0
 
     exts = {e.strip() if e.startswith(".") else "." + e.strip() for e in a.ext.split(",")}

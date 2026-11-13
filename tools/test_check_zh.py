@@ -84,12 +84,60 @@ class BoilerplatePile(unittest.TestCase):
                 "由此可见，推广有价值。")
         self.assertNotIn("boilerplate-pile", rules_of(text, level="error"))
 
+    def test_paragraph_lead_is_not_treated_as_list_item(self):
+        """行首的套话前面没有字符，空串不能让「"" in 顿号冒号括号」恒真而免检。"""
+        self.assertIn("boilerplate", rules_of("综上所述，本方案的可扩展性来自分层。"))
+
+    def test_real_list_after_colon_stays_exempt(self):
+        """真正的禁用词清单仍要豁免：命中词前一个是冒号或顿号。"""
+        self.assertNotIn("boilerplate",
+                         rules_of("不写套话：综上所述、值得注意的是、不难发现、在一定程度上。"))
+
     def test_eof_paragraph_is_flushed(self):
         """文件末尾没有空行时也要结算（曾经漏掉）。"""
         text = ("值得注意的是，方案不错。" + "\n"
                 "综上所述，团队付出很多。" + "\n"
                 "由此可见，推广有价值。")
         self.assertIn("boilerplate-pile", rules_of(text, level="error"))
+
+
+class AcronymUnexplained(unittest.TestCase):
+    """缩略语首现未解释（华为 2.11）：规则照加，默认关（实测误报比撑不起默认闸门）。"""
+
+    def setUp(self):
+        self._saved = set(check_zh._ENABLED_OFF)
+        check_zh._ENABLED_OFF = {"acronym-unexplained"}
+
+    def tearDown(self):
+        check_zh._ENABLED_OFF = self._saved
+
+    def test_bare_acronym_is_reported(self):
+        self.assertIn("acronym-unexplained", rules_of("列表项彼此重叠，MECE 失守。"))
+
+    def test_english_expansion_is_clean(self):
+        """华为 2.11 的正式写法：VPN（Virtual Private Network）。"""
+        self.assertNotIn("acronym-unexplained",
+                         rules_of("VPN（Virtual Private Network）用于跨网点通信。"))
+
+    def test_chinese_expansion_is_clean(self):
+        """2.11 只要求解释，中文说明同样合规（OCR（光学字符识别））。"""
+        self.assertNotIn("acronym-unexplained",
+                         rules_of("OCR（光学字符识别）的误读率见下表。"))
+
+    def test_expansion_at_first_mention_covers_later_bare_use(self):
+        text = "VPN（Virtual Private Network）用于组网。\n\n下一段直接用 VPN 指代它。"
+        self.assertNotIn("acronym-unexplained", rules_of(text))
+
+    def test_units_and_encoding_not_reported(self):
+        self.assertNotIn("acronym-unexplained", rules_of("文件写成 UTF-8，体积 2 MB。"))
+
+    def test_inline_code_and_quote_are_masked(self):
+        self.assertNotIn("acronym-unexplained", rules_of("`UGC` 已在契约里定义。"))
+        self.assertNotIn("acronym-unexplained", rules_of("「UGC」是平台术语，不是本文行文。"))
+
+    def test_off_by_default(self):
+        check_zh._ENABLED_OFF = set()
+        self.assertNotIn("acronym-unexplained", rules_of("列表项彼此重叠，MECE 失守。"))
 
 
 class DefaultOff(unittest.TestCase):
