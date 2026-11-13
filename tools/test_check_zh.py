@@ -135,6 +135,14 @@ class AcronymUnexplained(unittest.TestCase):
         self.assertNotIn("acronym-unexplained", rules_of("`UGC` 已在契约里定义。"))
         self.assertNotIn("acronym-unexplained", rules_of("「UGC」是平台术语，不是本文行文。"))
 
+    def test_definition_elsewhere_in_file_covers_it(self):
+        """「（下称「DSG」）」把 token 放进引号，逐行扫时它正被屏蔽，定义仍要生效。"""
+        text = "来源是 [document-style-guide](../docs/)（下称「DSG」）。\n\n后文引用 DSG 句子(2)。"
+        self.assertNotIn("acronym-unexplained", rules_of(text))
+
+    def test_model_number_is_not_an_acronym(self):
+        self.assertNotIn("acronym-unexplained", rules_of("型号之间用短划线：RJ-45、STM-16。"))
+
     def test_off_by_default(self):
         check_zh._ENABLED_OFF = set()
         self.assertNotIn("acronym-unexplained", rules_of("列表项彼此重叠，MECE 失守。"))

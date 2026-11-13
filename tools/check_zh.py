@@ -566,9 +566,18 @@ ACR_STOP = {
     "CI", "CD", "OCR", "SDK", "IDE", "OS", "PC", "CPU", "GPU", "RAM", "ROM", "SSD",
     "HDD", "HPC", "VM", "CMD", "EXE", "DLL", "PID", "UUID", "MD5", "SHA",
     "AI", "ML", "LLM", "NLP", "TTS", "STT", "ASR",
+    # 商标标记与品牌名：不是缩略语，没有「全称待兑换」这回事
+    "TM", "HUAWEI",
+    # 学术组织与会议名：按引用惯例不展开，读者按名查得到，与文件名同类
+    "ACL", "EMNLP", "NAACL", "COLING", "AAAI", "ICLR", "ICML", "CCL",
     # 日期占位符
     "YYYY", "MM", "DD", "HH",
 }
+# 定义式提及：「[document-style-guide](…)（下称「DSG」）」「以下简称 UGC」。token 在引号里，
+# 会被 LEX_QUOTE 屏蔽，首现位置因此落到后文，所以先扫全文收一遍，命中即全文免报。
+ACR_DEF = re.compile(r"(?:下称|以下简称|以下称|简称)\s*[「『“\"']?([A-Z][A-Z0-9]*(?:[/-][A-Z0-9]+)*)")
+# 字母＋连字符＋数字是型号（RJ-45、STM-16），不是缩略语。
+ACR_MODEL = re.compile(r"^[-–]\s*\d")
 
 # ---------------------------------------------------------------- 检查
 
@@ -609,6 +618,8 @@ def check_text(path: str, text: str, min_level: int):
     para_start, para_lines, para_chars = None, 0, 0
     pile = []  # 当前段落内套话命中：(行号, 列, 词)；段落 flush 时判定并在 ≥3 时报 error
     acr_first = {}  # 缩略语首现：token → (行, 列, 原文)；首现就兑换的记 None，后续裸用免报
+    # 定义式提及先扫全文一遍：token 在引号里，逐行扫时它正被 LEX_QUOTE 屏蔽着。
+    acr_defined = {dm.group(1) for dm in ACR_DEF.finditer(text)} if prose else set()
 
     def listish(line):
         """列表项、表格行、标题、引用块——不按段落计数。"""
@@ -669,6 +680,8 @@ def check_text(path: str, text: str, min_level: int):
                     continue
                 if any(t in ACR_STOP for t in re.split(r"[/-]", tok)):
                     continue
+                if tok in acr_defined or ACR_MODEL.match(m[am.end():am.end() + 3]):
+                    continue  # 全文已有定义式提及；字母＋连字符＋数字是型号（RJ-45）
                 if ACR_EXPLAIN.match(m[am.end():am.end() + 80]):
                     acr_first[tok] = None
                 else:
