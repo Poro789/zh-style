@@ -233,7 +233,13 @@ def mask_time_colons(m: str) -> str:
 COMPILED = [(rid, lvl, re.compile(rx), msg, ref, RNO.get(rid, ""), rid in PROSE_ONLY)
             for rid, lvl, rx, msg, ref in RULES if rx]
 LEVELS = {"error": 3, "warn": 2, "hint": 1}
+# 默认关闭的规则：中英文之间的空格交给 zhlint 这类排版工具前置处理，
+# 本检查器不接管（2026-11-13 决定，全量 1,683 条 hint 全是这一条）。
+DEFAULT_OFF = {"cjk-latin-space"}
+_ENABLED_OFF = set()
 EXCLAIM_PILE = re.compile(r"[！]{2,}|[！!]![！!]")
+# 提交哈希、十六进制串：unit-symbol 里的 cc/db 等字样不是单位（2026-11-13 审计 A1）。
+HEX_RUN = re.compile(r"(?<![0-9A-Za-z])[0-9a-f]{7,}(?![0-9A-Za-z])")
 
 # 检查器判不了的类别。跑完就打印：未覆盖的条款不产生任何信号，
 # 「0 error」与「全量校验过」在输出上无法区分，绿色读数会被当成交付凭证。
@@ -490,6 +496,8 @@ def check_text(path: str, text: str, min_level: int):
     cjk_rx = re.compile(rf"[{CJK}]")
 
     def add(lvl, rid, lineno, col, msg, snippet, ref=""):
+        if rid in DEFAULT_OFF and rid not in _ENABLED_OFF:
+            return
         if LEVELS[lvl] < min_level:
             return
         findings.append({"file": path, "line": lineno, "col": col, "level": lvl,
@@ -518,6 +526,13 @@ def check_text(path: str, text: str, min_level: int):
             return True
         return bool(re.match(r"^\d+[.)]\s", s))
 
+    def tabular(line):
+        """表格行，以及用 | 分字段的列表项——整行不是一个句子，不套句长规则。"""
+        s = line.lstrip()
+        if s[:1] == "|":
+            return True
+        return s[:1] in ("-", "*", "+") and line.count("|") >= 2
+
     def flush_para(at):
         nonlocal para_start, para_lines, para_chars
         if prose and para_start is not None and (para_lines > 7 or para_chars > 400):
@@ -542,6 +557,7 @@ def check_text(path: str, text: str, min_level: int):
         extra = () if prose else CODE_MASK_RES + ([PY_PAREN] if py else [])
         m = mask_line(raw, extra)
         m = mask_time_colons(m)  # 时间点内部冒号不计入 colon-pile（A3）
+        hex_spans = [(h.start(), h.end()) for h in HEX_RUN.finditer(raw)]
         if md:
             hm = HEADING.match(raw)
             if hm:
@@ -577,6 +593,8 @@ def check_text(path: str, text: str, min_level: int):
             for hit in rx.finditer(m):
                 if rid == "range-dash" and skip_range(m, hit):
                     continue
+                if rid == "unit-symbol" and any(s0 <= hit.start() < e0 for s0, e0 in hex_spans):
+                    continue  # 哈希串里的 cc/db 不是单位（2026-11-13 审计 A1）
                 if rid == "halfwidth-punct" and hit.start() in enum_idx:
                     continue
                 if rid == "dash-single" and hit.start() in term_idx:
@@ -600,7 +618,7 @@ def check_text(path: str, text: str, min_level: int):
         # 句子级规则。表格单元格按片段写（华为 2.8：单元格 ≤6 行、不写整句），
         # 所以表格行不套用正文的句长与构件长度规则。
         # 句子级规则只收中文行：英文行套中文句长阈值是类别错误（2026-11-05 修订）。
-        if prose and not re.match(r"^\s*\|", raw) and cjk_rx.search(m):
+        if prose and not tabular(raw) and cjk_rx.search(m):
             col = 0
             for sent in re.split(rf"(?<=[。！？；{chr(0xff1b)}])", m):
                 if sent:
@@ -726,17 +744,23 @@ def main(argv=None):
     ap.add_argument("--ext", default=".md,.txt", help="扫描的扩展名（默认 .md,.txt）")
     ap.add_argument("--exclude", action="append", metavar="GLOB",
                     help="排除路径（可多次）。默认已排除 extracted/、document-style-guide/（上游原文）与 feedback/（检查记录引用原文）")
+    ap.add_argument("--enable", action="append", default=[], metavar="RULE",
+                    help="打开默认关闭的规则（默认关：cjk-latin-space）")
     ap.add_argument("--no-gate", action="store_true", help="有 error 也返回 0")
     ap.add_argument("--no-residual", action="store_true",
                     help="不打印「检查器判不了的 8 类」清单（默认打印，防止 0 error 被当成全合规）")
     ap.add_argument("--max-file-size", type=int, default=1048576, metavar="BYTES",
                     help="单文件体积闸门：超过此字节数跳过（默认 1 MB；0 为不限）。大 txt 数据文件会拖死目录模式（2026-11-13 检查事故）")
     a = ap.parse_args(argv)
+    global _ENABLED_OFF
+    _ENABLED_OFF = set(a.enable)
 
     if a.rules:
         print(f"{'规则':22} {'级别':7} {'清单':10} {'出处':36} 说明")
         for rid, lvl, _, msg, ref, rno, prose_only in COMPILED:
             tag = f"{lvl}*" if prose_only else lvl
+            if rid in DEFAULT_OFF:
+                tag += "（默认关）"
             print(f"{rid:22} {tag:7} {rno:10} {ref:36} {msg}")
         for rid, lvl, rno, ref, msg in LINE_RULES + STRUCTURE_RULES + FILE_RULES:
             print(f"{rid:22} {lvl:7} {rno:10} {ref:36} {msg}")
@@ -778,9 +802,10 @@ def main(argv=None):
     else:
         by_rule = {}
         for x in all_findings:
-            by_rule.setdefault(x["rule"], []).append(x)
+            by_rule.setdefault((x["rule"], x["level"]), []).append(x)
         order = {"error": 0, "warn": 1, "hint": 2}
-        for rid, items in sorted(by_rule.items(), key=lambda kv: (order[kv[1][0]["level"]], -len(kv[1]))):
+        for (rid, lvl), items in sorted(by_rule.items(),
+                                        key=lambda kv: (order[kv[0][1]], -len(kv[1]))):
             x0 = items[0]
             tag = f"；清单 {x0['rno']}" if x0.get("rno") else ""
             print(f"\n[{x0['level']:5}] {rid} × {len(items)}  — {x0['message']}  (出处：{x0['ref']}{tag})")
