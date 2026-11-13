@@ -5,7 +5,7 @@
     python tools/extract_html_clean.py <文件.html …> -o 输出目录
     python tools/extract_html_clean.py <html 所在目录>   # 只取该目录下直接的 .html，不递归
 
-背景（rules/11-13-check-record.md · D2/A5）:
+背景（2026-11-13 检查记录 D2/A5，原文存仓外健康档案区不入库）:
 - <style> 整块跳过。
 - <script> 不取代码，只取引号串（' " `）中 ≥4 字符且含汉字的片段。
 - 过滤含 ${ 的行（JS 模板拼接，三元运算会把引号规则打成误报）

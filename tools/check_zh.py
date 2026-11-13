@@ -746,7 +746,7 @@ def main(argv=None):
         print("口径（2026-11-05 修订）：正文级规则（paragraph-long、long-sentence、clause-long、clause-enum）只套在 .md/.markdown/.txt 的中文行上；配置与代码文件只跑词法级规则")
         print("口径（2026-11-10 新增）：标题层级规则只跑 .md，跳过 YAML front matter 与代码块；并列逗号按整行构件判定，千分位与 e.g., 不算并列")
         print("口径（2026-11-10 新增）：.py 用 tokenize 抽出 docstring 与注释后只查这些文本；docstring 里半角括号段按代码写法屏蔽；--word 形式的双连字符（CLI 标志、CSS 变量）不算破折号误用")
-        print("口径（2026-11-13 新增，来自 feedback/11-13-check-record）：HTML 注释整块屏蔽；「汉字1～4字—汉字1～4字」同形 ≥3 次视为术语连接号不报 dash-single；纯时间点冒号不报 colon-pile；含 ${ 或 HTML 标签起行的 JS 模板行跳过词法规则；≤6 字无逗号短行视为断段点；单文件默认 >1MB 跳过（--max-file-size）")
+        print("口径（2026-11-13 新增，来自 11-13 检查记录，原文存仓外不入库）：HTML 注释整块屏蔽；「汉字1～4字—汉字1～4字」同形 ≥3 次视为术语连接号不报 dash-single；纯时间点冒号不报 colon-pile；含 ${ 或 HTML 标签起行的 JS 模板行跳过词法规则；≤6 字无逗号短行视为断段点；单文件默认 >1MB 跳过（--max-file-size）")
         return 0
 
     exts = {e.strip() if e.startswith(".") else "." + e.strip() for e in a.ext.split(",")}
