@@ -25,7 +25,9 @@ zh-style-kit/
 ├── tools/
 │   ├── extract_pdf.py            PDF → UTF-8 文本入口，自动选 pdftotext / pypdf / pdf2text
 │   ├── pdf2text.py               纯标准库 PDF → 文本（无 pdftotext、无第三方库时的替代）
-│   └── check_zh.py               中文规则检查器（纯标准库）
+│   ├── check_zh.py               中文规则检查器（纯标准库）
+│   ├── zh_triage.py              读数聚合层：把逐条发现压成 top 表（纯标准库）
+│   └── test_check_zh.py          检查器行为断言（unittest，纯标准库）
 ├── samples/
 │   ├── bad-example.md            故意写坏的样例（也是检查器的测试输入）
 │   └── good-example.md           同一内容的改写版，可用作喂给模型的风格示例
@@ -50,6 +52,10 @@ python tools/check_zh.py .
 python tools/check_zh.py rules/ samples/ --level warn
 python tools/check_zh.py docs/README.md --json
 python tools/check_zh.py --rules          # 打印全部规则、清单编号与出处
+
+python tools/zh_triage.py .               # 读数压成 top 表，有 error 退出码 1
+python tools/zh_triage.py . --files       # 附上读数最响的 5 个文件
+python tools/test_check_zh.py             # 检查器断言：样例读数与两处误报修复
 ```
 
 退出码：有 `error` 级问题返回 1，可用于 CI 闸门（`--no-gate` 关闭）。
@@ -59,6 +65,20 @@ python tools/check_zh.py --rules          # 打印全部规则、清单编号与
 文本输出末尾固定打印一段「检查器判不了的 8 类」自查清单，另加删修饰、回译两个测试。未覆盖的条款不产生报错，绿色读数容易被当成全量校验的凭证。CI 里用 `--no-residual` 关掉这段。
 
 `--rules` 的「清单」列把每条规则映射到 `rules/AI怪中文-常见病句清单与修法.md` 的 `R-xx` 编号，报错可以直接反查改法。空白表示该条没有清单编号。
+
+## 2026-11-13 审计（30 条抽样）
+
+全量语料 1,324 个中文文档，`error` 8,778 条。按规则分层抽 30 条逐条判定：`dunhao-comma` 11/11 真、`halfwidth-punct` 11/11 真、`clause-long` 3/4 真、`range-unit` 2/2 真、`unit-symbol` 1/2 真（另 1 条是提交哈希里的 `cc`，1 条定位不到）。
+
+据此改了三处：
+
+- `unit-symbol` 不再判十六进制串里的 `cc`、`db`（`HEX_RUN` 排除）。
+- `clause-long` 不再把「`-` 开头、含 ≥2 个 `|`」的表格化列表项算成一个构件（36 处）。
+- `cjk-latin-space` 默认关。中英文空格交给 `zhlint` 这类前置排版工具；需要时用 `--enable cjk-latin-space` 打开。
+
+两条主力规则合计占 87.8% 的 `error`，实测全真，因此没有降级任何 `error` 级规则。
+
+`feedback/` 下引用真实档案原文的记录不入库（见 `.gitignore`），只保留模板与脱敏判定。
 
 ## 读数怎么读
 

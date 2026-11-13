@@ -3,3 +3,9 @@ document-style-guide/
 
 __pycache__/
 *.pyc
+
+# 检查记录：引用真实档案原文的那种不入库，只留模板与脱敏判定。
+# 2026-11-13 公开库发生过一次真实家庭档案泄漏，靠 filter-repo 才清掉。
+# 模板本身保留跟踪（已 tracked 的文件不受本规则影响）。
+feedback/*
+!feedback/检查记录-模板.md

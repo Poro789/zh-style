@@ -98,3 +98,14 @@
 3. **排版遍**：半角标点、引号、省略号、破折号、连接号、数值范围、单位符号、中英文空格、界面元素标记。
 
 改完再跑一次 `python tools/check_zh.py .`，目标是 0 个 error。
+
+## 外部参照（2026-11-13 加）
+
+本清单的 A～F 六类是症状描述，不承担「AI 味到底有哪些模式」的权威。要完整枚举时以下面两份为准，本清单只保留中文改写示例与可机检条目。
+
+- [`qu-ai-wei` 的 pattern-catalog](https://github.com/LifelongLazyLearner/qu-ai-wei/blob/main/references/pattern-catalog.md)：八族、约三十个模式。每个模式给骨架、触发、保护、动作、复扫五段，并标注证据等级（中文实证／中文研究启发／跨语言研究启发／编辑实践）。
+- [`humanizer`](https://github.com/blader/humanizer)：英文 26 个 pattern，基于 Wikipedia《Signs of AI writing》，是上面那份的上源。
+
+新增 AI 味条目时先查这两份，能引用就不新写。确实要新写，`ref` 字段写明出处；写「本库判断」的条目只配当 `hint`，不配进 `error`。
+
+已落地的一条实证出处：句长与句式节奏过齐，出处在 CCL 2023 表 2（直接测量句长标准差），另有 [EMNLP 2024](https://aclanthology.org/2024.emnlp-main.368/) 测句法模板。
