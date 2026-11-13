@@ -78,6 +78,8 @@ python tools/test_check_zh.py             # 检查器断言：样例读数与两
 
 两条主力规则合计占 87.8% 的 `error`，实测全真，因此没有降级任何 `error` 级规则。
 
+- `boilerplate` 拆成两条。单次出现报 `hint`，只当线索；同一段落内 ≥3 次报 `error`（`boilerplate-pile`）。口径照上游的规则结构——单次不算问题，反复出现才算。全量 1,324 个文档上 `boilerplate-pile` 0 命中，等于一条零误报、也还没拦过东西的保险。
+
 `feedback/` 下引用真实档案原文的记录不入库（见 `.gitignore`），只保留模板与脱敏判定。
 
 ## 读数怎么读
