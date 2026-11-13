@@ -147,6 +147,13 @@ RULES = [
     ("exclaim-soft", "hint",
      r"[！]",
      "技术说明用陈述语气，正文尽量不用感叹号", "华为 2.4 / ruanyf paragraph.md 原则"),
+    # ——2026-11-13 检查记录入库的新规则（B3、B5、B6；B1 在 check_text 尾部按整文件判定）——
+    ("heading-sentence", "hint",
+      rf"^#{{1,6}}\s+.*[。！？{chr(0xff1f)}]",
+      "标题应为名词性短语，不带句末标点；整句放正文", "华为 2.3（标题不带标点）延伸"),
+    ("dialog-residue", "hint",
+      r"^\s*(?:#{1,6}\s+)?(?:以下是|下面是|下面将)",
+      "对话残留开头：「以下是……」是对话接缝，不该进档案正文，删掉或改直接陈述", "rules/AI怪中文-常见病句清单与修法.md（本仓库补充）"),
 ]
 
 # 词法表之外的规则：并列逗号和标题结构靠整行扫描判定，不进 COMPILED，但要在 --rules 里可见。
@@ -169,6 +176,16 @@ STRUCTURE_RULES = [
      "上级标题下只有一个次级标题，并入上级或补出兄弟标题"),
 ]
 
+# 文件级规则：每文件至多一条，在 check_text 尾部专门判定，不进逐字符正则循环。
+FILE_RULES = [
+    ("truncated-file", "hint", "", "本库判断（截断文件读都会发现，规则只是显式化）",
+     "文件结尾无句末标点，疑似截断"),
+    ("date-format-mixed", "warn", "", "本库归档口径 + AGENTS.md「同一篇只用一种」类比迁移",
+     "同一文档 ≥2 种日期写法（2026-02-15 / 2026/2/15 / 20260222 / 2026年2月15日），统一为 YYYY-MM-DD"),
+    ("percent-form-mixed", "hint", "", "ruanyf text.md（半角的百分号，视同阿拉伯数字）",
+     "同一文档混用全角％与半角%，统一为半角%"),
+]
+
 # --rules 的「清单」列：对应 rules/AI怪中文-常见病句清单与修法.md 的 R-xx 编号。
 # 空串 = 该条在清单里没有编号（需人判的条目，或本仓库补充项）。
 RNO = {
@@ -181,6 +198,7 @@ RNO = {
     "login-word": "R-word", "colon-pile": "R-colon", "figure-colon": "R-figure",
     "click-word": "E·界面用语", "table-same-as-above": "", "cjk-latin-space": "R-space",
     "fullwidth-digit": "R-digit", "exclaim-pile": "R-exclaim", "exclaim-soft": "R-exclaim",
+    "heading-sentence": "", "dialog-residue": "",
 }
 
 # 只在散文文件（.md/.markdown/.txt）里跑的规则：代码与配置里的感叹号多是数据或语法。
@@ -189,15 +207,31 @@ PROSE_ONLY = {"exclaim-soft", "latin-enum-comma"}
 RNO_MAP = dict(RNO)
 REFS = {}
 LMSG = {}
-for _rid, _lvl, _rno, _ref, _msg in LINE_RULES + STRUCTURE_RULES:
+for _rid, _lvl, _rno, _ref, _msg in LINE_RULES + STRUCTURE_RULES + FILE_RULES:
     RNO_MAP.setdefault(_rid, _rno)
     REFS[_rid] = _ref
     LMSG[_rid] = _msg
 
 HEADING = re.compile(r"^\s{0,3}(#{1,6})\s+(.+?)\s*$")
+# JS 模板行：含 ${ 插值或以 HTML 标签起行的，是代码不是正文，整行跳过词法规则
+# （2026-11-13 检查记录 A5；提取器已在提取侧过滤，但正文直传不走提取器，这里独立兜底）。
+JS_TEMPLATE = re.compile(r"\$\{|^\s*</?[A-Za-z]")
+# 时间点（08:30、09:11:47）里的冒号是时间格式，不是标点连排（2026-11-13 检查记录 A3）。
+TIMEISH = re.compile(r"\b\d{1,2}:\d{2}(?::\d{2})?\b")
 
+
+def mask_time_colons(m: str) -> str:
+    """把 08:30、09:11:47 这类时间串内部的冒号换成空格，使 colon-pile 不再把时间点当连排冒号。"""
+    out = list(m)
+    for mm in TIMEISH.finditer(m):
+        for j in range(mm.start(), mm.end()):
+            if out[j] == ":":
+                out[j] = " "
+    return "".join(out)
+
+# rx 为空串的规则走 check_text 里的专门判定（文件级），不进逐字符正则循环。
 COMPILED = [(rid, lvl, re.compile(rx), msg, ref, RNO.get(rid, ""), rid in PROSE_ONLY)
-            for rid, lvl, rx, msg, ref in RULES]
+            for rid, lvl, rx, msg, ref in RULES if rx]
 LEVELS = {"error": 3, "warn": 2, "hint": 1}
 EXCLAIM_PILE = re.compile(r"[！]{2,}|[！!]![！!]")
 
@@ -325,10 +359,24 @@ MASK_RES = [
     re.compile(r"(?<![\w])[\w./\\-]*\.(?:md|py|pdf|txt|json|ya?ml|js|ts|bat|sh|csv|xlsx|docx)\b"),
     re.compile(r"\]\([^)\n]*\)"),                        # markdown 链接目标
     re.compile(r"^\s{0,3}[-*+]\s+\[[ xX]\]"),
+    # HTML 注释是转录件的结构标记（分页注释、豁免标记），内容不进任何规则（2026-11-13 检查记录 A1）
+    re.compile(r"<!--.*?-->"),
 ]
 
 
 TOKEN_RES = re.compile(r"[\u4e00-\u9fff]|[A-Za-z0-9_.\-/]+")
+# 天然断点：PDF 文本层提取常把一段切成固定宽度的硬换行行，丢掉段落分隔。
+# 记录口径：单行 ≤6 字（宽度）且不含逗号，视为标题行/节名行这类硬断点（2026-11-13 检查记录 A6）。
+# HEXACO_测试结果.md 的「一、关于 HEXACO 模型」等节名行即靠此断开 23 行假长段。
+SOFT_BREAK_MAX = 6
+
+
+def soft_break(line: str) -> bool:
+    if not line.strip():
+        return False
+    if width(line) > SOFT_BREAK_MAX:
+        return False
+    return not re.search(r"[，,]", line)
 
 # 代码与配置文件里引号内的内容是数据，不是正文：规则表自己的正则和提示词会被本工具
 # 的词表命中。注释仍然检查（2026-11-05 修订）。
@@ -342,6 +390,20 @@ PY_PAREN = re.compile(r"[\[({][^)\]}\n]*[)\]}]")
 # --word 形式是 CLI 标志（--dry）或 CSS 自定义属性（var(--rule)），不算拿双连字符冒充破折号。
 # 汉字直接跟在后面的仍然报。
 DASHFLAG = re.compile(r"(?<![-\w一-鿿])-{2,3}[A-Za-z]")
+# 术语连接号：PVQ-RR 这类官方二分支概念名（「自主—思想」）用 — 连接两个并列词，
+# 是华为 3.8 连接号的正当用途。同一「汉字1～4字—汉字1～4字」形态全文出现 ≥3 次 → 术语名，
+# dash-single 不报（2026-11-13 检查记录 A2）。
+TERM_DASH = re.compile(rf"(?<![{CJK}])[{CJK}]{{1,4}}—[{CJK}]{{1,4}}(?!{CJK})")
+
+# 日期形态（B3）：只认数字类写法，「2025 年 12 月」这类带空格的中文写法归人工。
+# 词边界防止匹配进更长的数字串；8 位形态另加月/日合法性校验，降低版本号误判。
+DATE_FORMS = [
+    re.compile(r"(?<!\d)\d{4}-\d{1,2}-\d{1,2}(?!\d)"),
+    re.compile(r"(?<!\d)\d{4}/\d{1,2}/\d{1,2}(?!\d)"),
+    re.compile(r"(?<!\d)\d{4}\.\d{1,2}\.\d{1,2}(?!\d)"),
+    re.compile(r"(?<![A-Za-z0-9])\d{4}(?:0[1-9]|1[0-2])(?:0[1-9]|[12]\d|3[01])(?![A-Za-z0-9])"),
+    re.compile(r"(?<!\d)\d{4}年\d{1,2}月\d{1,2}日"),
+]
 
 
 def py_prose_lines(text: str):
@@ -436,6 +498,14 @@ def check_text(path: str, text: str, min_level: int):
                          "rno": RNO_MAP.get(rid, "")})
 
     lines = text.splitlines()
+    # 术语连接号预扫描：文档里 `汉字1～4字—汉字1～4字` 这个形状出现 ≥3 次，判为术语命名表
+    # （PVQ-RR 每个价值名在结果表与对照表各印一次，共 2 次，但整表 11 个同形词，形状累计 ≫3）。
+    # 命中该形状的位置，dash-single 不报（2026-11-13 检查记录 A2）。
+    term_positions = []
+    for ln in lines:
+        for mm in TERM_DASH.finditer(ln):
+            term_positions.append(mm.group(0))
+    term_shape = len(term_positions) >= 3
     in_fence = False
     in_front = False
     sentences = []  # (lineno, col, 句子文本)
@@ -471,12 +541,13 @@ def check_text(path: str, text: str, min_level: int):
             continue
         extra = () if prose else CODE_MASK_RES + ([PY_PAREN] if py else [])
         m = mask_line(raw, extra)
+        m = mask_time_colons(m)  # 时间点内部冒号不计入 colon-pile（A3）
         if md:
             hm = HEADING.match(raw)
             if hm:
                 headings.append((len(hm.group(1)), hm.group(2).rstrip("#").strip(), i))
         if raw.strip():
-            if listish(raw):            # 列表、表格、标题、引用块不按段落计数
+            if listish(raw) or soft_break(raw):  # 列表/表格/标题/引用块与短行断点不按段落计数
                 flush_para(i)
             else:
                 if para_start is None:
@@ -492,15 +563,24 @@ def check_text(path: str, text: str, min_level: int):
         enum_idx = set(enum_cjk) | set(enum_wide)
         pile_idx = {p for h in EXCLAIM_PILE.finditer(m) for p in range(h.start(), h.end())}
         flag_idx = {p for h in DASHFLAG.finditer(m) for p in range(h.start(), h.end())}
+        js_line = bool(JS_TEMPLATE.search(raw))
+        term_idx = set()
+        if term_shape:
+            for mm in TERM_DASH.finditer(m):
+                term_idx.update(range(mm.start(), mm.end()))
 
         for rid, lvl, rx, msg, ref, rno, prose_only in COMPILED:
             if prose_only and not prose:
+                continue
+            if js_line:  # JS 模板行：引号、连字符、冒号都是代码语法（A5）
                 continue
             for hit in rx.finditer(m):
                 if rid == "range-dash" and skip_range(m, hit):
                     continue
                 if rid == "halfwidth-punct" and hit.start() in enum_idx:
                     continue
+                if rid == "dash-single" and hit.start() in term_idx:
+                    continue  # 术语连接号（A2）
                 if rid == "exclaim-soft" and hit.start() in pile_idx:
                     continue
                 if rid == "double-hyphen":
@@ -577,18 +657,48 @@ def check_text(path: str, text: str, min_level: int):
                 f"h{clevel}「{ctitle}」是 h{plevel}「{ptitle}」下唯一的子标题，并入上级或补出兄弟标题",
                 lines[clino - 1])
 
+    # 文件级规则（2026-11-13 检查记录 B1、B3、B4）：每文件至多一条，先聚合再按 min_level 过滤。
+    file_hits = []
+    if prose:
+        nonempty = [(k, x) for k, x in enumerate(lines, 1) if x.strip()]
+        if nonempty:
+            k, last = nonempty[-1]
+            if len(nonempty) >= 10 and not re.search(r"[。！？…」』）]|\|\s*$", last):
+                file_hits.append(("hint", "truncated-file", k, 1,
+                                  "文件结尾无句末标点，疑似截断；确认最后一段写完了", last))
+        forms = {}
+        for rx in DATE_FORMS:
+            first = rx.search(text)
+            if first:
+                forms[rx.pattern] = first.group(0)
+        if len(forms) >= 2:
+            sample = "、".join(sorted(set(forms.values()))[:3])
+            file_hits.append(("warn", "date-format-mixed", 1, 1,
+                              f"文档内混用 {len(forms)} 种日期写法（如 {sample}），统一为 YYYY-MM-DD", lines[0]))
+        if "％" in text and "%" in text:
+            file_hits.append(("hint", "percent-form-mixed", 1, 1,
+                              "同一文档混用全角％与半角%，统一为半角%", lines[0]))
+    for lvl, rid, ln, col, msg, sn in file_hits:
+        add(lvl, rid, ln, col, msg, sn)
+
     return findings
 
 
-def iter_files(targets, exts, excludes):
+def iter_files(targets, exts, excludes, max_size=None):
     for t in targets:
         p = Path(t)
         if p.is_dir():
             for f in sorted(p.rglob("*")):
                 if f.is_file() and f.suffix.lower() in exts and not is_excluded(f, excludes):
+                    if max_size and f.stat().st_size > max_size:
+                        print(f"跳过（超 {max_size} 字节，--max-file-size 可调）: {f}", file=sys.stderr)
+                        continue
                     yield f
         elif p.is_file():
             if not is_excluded(p, excludes):
+                if max_size and p.stat().st_size > max_size:
+                    print(f"跳过（超 {max_size} 字节，--max-file-size 可调）: {p}", file=sys.stderr)
+                    continue
                 yield p
         else:
             print(f"跳过（不存在）: {t}", file=sys.stderr)
@@ -619,6 +729,8 @@ def main(argv=None):
     ap.add_argument("--no-gate", action="store_true", help="有 error 也返回 0")
     ap.add_argument("--no-residual", action="store_true",
                     help="不打印「检查器判不了的 8 类」清单（默认打印，防止 0 error 被当成全合规）")
+    ap.add_argument("--max-file-size", type=int, default=1048576, metavar="BYTES",
+                    help="单文件体积闸门：超过此字节数跳过（默认 1 MB；0 为不限）。大 txt 数据文件会拖死目录模式（2026-11-13 检查事故）")
     a = ap.parse_args(argv)
 
     if a.rules:
@@ -626,7 +738,7 @@ def main(argv=None):
         for rid, lvl, _, msg, ref, rno, prose_only in COMPILED:
             tag = f"{lvl}*" if prose_only else lvl
             print(f"{rid:22} {tag:7} {rno:10} {ref:36} {msg}")
-        for rid, lvl, rno, ref, msg in LINE_RULES + STRUCTURE_RULES:
+        for rid, lvl, rno, ref, msg in LINE_RULES + STRUCTURE_RULES + FILE_RULES:
             print(f"{rid:22} {lvl:7} {rno:10} {ref:36} {msg}")
         print("\n「清单」列对应 rules/AI怪中文-常见病句清单与修法.md 的 R-xx 编号；空白 = 本仓库补充项或无对应条目。")
         print("带 * 的规则只跑散文文件（.md/.markdown/.txt）。")
@@ -634,6 +746,7 @@ def main(argv=None):
         print("口径（2026-11-05 修订）：正文级规则（paragraph-long、long-sentence、clause-long、clause-enum）只套在 .md/.markdown/.txt 的中文行上；配置与代码文件只跑词法级规则")
         print("口径（2026-11-10 新增）：标题层级规则只跑 .md，跳过 YAML front matter 与代码块；并列逗号按整行构件判定，千分位与 e.g., 不算并列")
         print("口径（2026-11-10 新增）：.py 用 tokenize 抽出 docstring 与注释后只查这些文本；docstring 里半角括号段按代码写法屏蔽；--word 形式的双连字符（CLI 标志、CSS 变量）不算破折号误用")
+        print("口径（2026-11-13 新增，来自 feedback/11-13-check-record）：HTML 注释整块屏蔽；「汉字1～4字—汉字1～4字」同形 ≥3 次视为术语连接号不报 dash-single；纯时间点冒号不报 colon-pile；含 ${ 或 HTML 标签起行的 JS 模板行跳过词法规则；≤6 字无逗号短行视为断段点；单文件默认 >1MB 跳过（--max-file-size）")
         return 0
 
     exts = {e.strip() if e.startswith(".") else "." + e.strip() for e in a.ext.split(",")}
@@ -641,7 +754,7 @@ def main(argv=None):
     all_findings = []
     scanned = 0
     excludes = DEFAULT_EXCLUDES + (a.exclude or [])
-    for f in iter_files(a.targets or ["."], exts, excludes):
+    for f in iter_files(a.targets or ["."], exts, excludes, a.max_file_size):
         try:
             text = f.read_text(encoding="utf-8")
         except UnicodeDecodeError:
@@ -654,7 +767,13 @@ def main(argv=None):
         counts[x["level"]] += 1
 
     if a.json:
-        print(json.dumps({"files": scanned, "counts": counts, "findings": all_findings},
+        hint_top = {}
+        for x in all_findings:
+            if x["level"] == "hint":
+                hint_top[x["rule"]] = hint_top.get(x["rule"], 0) + 1
+        print(json.dumps({"files": scanned, "counts": counts,
+                          "hintTopN": dict(sorted(hint_top.items(), key=lambda kv: -kv[1])),
+                          "findings": all_findings},
                          ensure_ascii=False, indent=2))
     else:
         by_rule = {}
