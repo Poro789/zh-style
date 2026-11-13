@@ -62,6 +62,36 @@ class Audit20261113(unittest.TestCase):
         self.assertIn("clause-long", rules_of(line, level="warn"))
 
 
+class BoilerplatePile(unittest.TestCase):
+    """套话密度口径：单次是线索，同段落 ≥3 次才报 error（照上游的规则结构）。"""
+
+    def test_three_in_one_paragraph_is_error(self):
+        text = "值得注意的是，方案效果不错。综上所述，团队付出很多。由此可见，推广有价值。"
+        self.assertIn("boilerplate-pile", rules_of(text, level="error"))
+
+    def test_single_occurrence_is_not_error(self):
+        self.assertNotIn("boilerplate-pile",
+                         rules_of("值得注意的是，这个参数在 10 秒内生效。", level="error"))
+
+    def test_two_occurrences_is_not_error(self):
+        self.assertNotIn("boilerplate-pile",
+                         rules_of("值得注意的是，方案不错。综上所述，团队付出很多。", level="error"))
+
+    def test_paragraph_boundary_resets_count(self):
+        """空行分段后各段单独计数，不跨段累加。"""
+        text = ("值得注意的是，方案不错。" + "\n\n"
+                "综上所述，团队付出很多。" + "\n\n"
+                "由此可见，推广有价值。")
+        self.assertNotIn("boilerplate-pile", rules_of(text, level="error"))
+
+    def test_eof_paragraph_is_flushed(self):
+        """文件末尾没有空行时也要结算（曾经漏掉）。"""
+        text = ("值得注意的是，方案不错。" + "\n"
+                "综上所述，团队付出很多。" + "\n"
+                "由此可见，推广有价值。")
+        self.assertIn("boilerplate-pile", rules_of(text, level="error"))
+
+
 class DefaultOff(unittest.TestCase):
     """cjk-latin-space 默认关，--enable 打开。"""
 

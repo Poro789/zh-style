@@ -64,6 +64,10 @@ MISTYPES = {  # 常见错别字/异形词（现代规范推荐写法）
 def _alt(words):
     return "|".join(re.escape(w) for w in sorted(words, key=len, reverse=True))
 
+# 套话词表：单次命中只是线索（hint），同段落 ≥3 次由 boilerplate-pile 报 error。
+# 口径照 qu-ai-wei 的规则结构：单次不算问题，反复出现才算（编辑实践级，非统计实证）。
+BOILER_RE = re.compile(_alt(BOILER))
+
 RULES = [
     # id, level, regex, message, 出处
     ("halfwidth-punct", "error",
@@ -111,9 +115,10 @@ RULES = [
     ("de-chain", "warn",
      rf"[{CJK}]的[{CJK}]{{1,6}}的[{CJK}]{{1,6}}的",
      "连续三层“的”定语，读起来是翻译腔，拆句或改并列", "ruanyf text.md"),
-    ("boilerplate", "warn",
+    ("boilerplate", "hint",
      _alt(BOILER),
-     "AI 高频套话，删掉后信息量不变就删", "rules/AI怪中文-常见病句清单与修法.md"),
+     "AI 高频套话：单次出现只是线索，同段落 ≥3 次由 boilerplate-pile 报 error",
+     "qu-ai-wei pattern-catalog 预判标签族（编辑实践）+ 本仓库清单 C·套话"),
     ("fuzzy-word", "hint",
      _alt(FUZZY),
      "程度/模糊量词：给出数据或具体条件，否则删掉", "华为 2.15"),
@@ -174,6 +179,9 @@ STRUCTURE_RULES = [
      "标题跳级（如 h2 直接到 h4），补齐中间层级"),
     ("heading-orphan", "warn", "R-heading", "DSG 标题·原则(2) / 华为 2.3 样式",
      "上级标题下只有一个次级标题，并入上级或补出兄弟标题"),
+    ("boilerplate-pile", "error", "C·套话",
+     "qu-ai-wei pattern-catalog 预判标签族（编辑实践）+ 本仓库清单 C·套话",
+     "同一段落内套话 ≥3 次：套话在承重，改结构而不是逐词删"),
 ]
 
 # 文件级规则：每文件至多一条，在 check_text 尾部专门判定，不进逐字符正则循环。
@@ -519,6 +527,8 @@ def check_text(path: str, text: str, min_level: int):
     sentences = []  # (lineno, col, 句子文本)
     headings = []   # (级别, 标题文字, 行号) —— 只有 .md 收集
     para_start, para_lines, para_chars = None, 0, 0
+    pile = []  # 当前段落内套话命中：(行号, 列, 词)；段落 flush 时判定并在 ≥3 时报 error
+
     def listish(line):
         """列表项、表格行、标题、引用块——不按段落计数。"""
         s = line.lstrip()
@@ -534,12 +544,18 @@ def check_text(path: str, text: str, min_level: int):
         return s[:1] in ("-", "*", "+") and line.count("|") >= 2
 
     def flush_para(at):
-        nonlocal para_start, para_lines, para_chars
+        nonlocal para_start, para_lines, para_chars, pile
         if prose and para_start is not None and (para_lines > 7 or para_chars > 400):
             add("warn", "paragraph-long", para_start, 1,
                 f"段落 {para_lines} 行 / {para_chars} 字：一个段落只讲一个中心句，建议 ≤4 行、不超过 7 行",
                 lines[para_start - 1], "华为 2.4")
+        if prose and para_start is not None and len(pile) >= 3:
+            words = "、".join(sorted({w for _, _, w in pile}))
+            add("error", "boilerplate-pile", para_start, 1,
+                f"同段套话 {len(pile)} 次（{words}）：套话在承重，改结构而不是逐词删",
+                lines[para_start - 1], "qu-ai-wei pattern-catalog（编辑实践）+ 本仓库清单 C·套话")
         para_start, para_lines, para_chars = None, 0, 0
+        pile = []
 
     for i, raw in enumerate(lines, 1):
         if i == 1 and raw.strip() == "---":
@@ -570,6 +586,8 @@ def check_text(path: str, text: str, min_level: int):
                     para_start = i
                 para_lines += 1
                 para_chars += width(m)  # 与句长同一口径：拉丁词按 1 计（2026-11-05 修订）
+                for bm in BOILER_RE.finditer(m):
+                    pile.append((i, bm.start() + 1, bm.group(0)))
         else:
             flush_para(i)
 
@@ -625,10 +643,7 @@ def check_text(path: str, text: str, min_level: int):
                     sentences.append((i, col, sent))
                 col += len(sent)
 
-    if prose and para_start is not None and (para_lines > 7 or para_chars > 400):
-        add("warn", "paragraph-long", para_start, 1,
-            f"段落 {para_lines} 行 / {para_chars} 字：建议 ≤4 行、不超过 7 行",
-            lines[para_start - 1], "华为 2.4")
+    flush_para(len(lines) + 1)  # 文件末尾的段落也要结算：paragraph-long 与 boilerplate-pile 都在这里
 
     for lineno, col, sent in sentences:
         n = width(sent)
