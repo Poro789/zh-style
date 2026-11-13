@@ -31,6 +31,8 @@ python tools/extract_pdf.py <pdf>          # PDF→UTF-8 文本，自动选 pdft
 
 写完先跑 `python tools/check_zh.py <路径>`，把 `error` 清零，再逐条过 `rules/` 里 A～F 六类（检查器管不到的：结构套话、列表重叠、术语一致、举例合规）。改写对照见 `samples/bad-example.md` → `samples/good-example.md`，可直接当 few-shot 示例喂给模型。
 
+改 `tools/check_zh.py` 的口径后，先跑 `python tools/test_check_zh.py`，再看检查器读数。断言锁住样例的 error 数与历次修掉的误报，改口径极易打破它们。2026-11-13 实施并列清单豁免时没跑，一条「行首取到空串、`"" in "、：:（(" ` 恒真」的漏检就是这么混进提交的。
+
 检查发现系统性误判或规则缺口时，按 `feedback/检查记录-模板.md` 写一份检查记录，存 `feedback\`。触发条件有三类：同一规则在同库误判 ≥2 处；规则没抓到的新特征且带反例；检查器异常且定位了根因。出口：A 改 `tools/check_zh.py` 口径，B 出处可查证才进检查器，C 留在记录，D 进 `tools\`。实施完回填记录的处置字段。
 
 ## 不可破坏的约定

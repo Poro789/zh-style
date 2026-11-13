@@ -89,7 +89,7 @@ python tools/test_check_zh.py             # 检查器断言：样例读数与两
 句子级规则三条：
 
 - `long-sentence`：整句 >100 字（华为 2.5）。
-- `clause-long`：逗号之间的构件 >40 字报 `error`，30～39 字报 `warn`（DSG 文本·句子(1)）。
+- `clause-long`：逗号之间的构件 >40 字报 `error`，30～39 字报 `warn`（出处 ruanyf 的 document-style-guide「文本·句子(1)」）。
 - `clause-enum`：4 个以上并列项挤在一句，改项目列表（华为 2.6）。
 
 长度口径：汉字按字计、连续拉丁词按 1 计、标点不计，否则中英混排会虚高。表格行不套用句长规则，因为华为 2.8 规定单元格按片段写。
