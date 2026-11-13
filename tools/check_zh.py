@@ -54,6 +54,7 @@ BOILER = [  # AI 高频套话
 ]
 VAGUE_ACT = r"(?:进行|实现|提供|支持|作出|做出)(?:了|过)?(?:对)?"
 BEI = r"被(?:认为|视为|称为|用于|设计|定义|实现|采用|要求|称为|设置|分配)"
+BEI_RE = re.compile(BEI)
 MISTYPES = {  # 常见错别字/异形词（现代规范推荐写法）
     "其它": "其他", "帐户": "账户", "帐号": "账号", "做为": "作为",
     "既使": "即使", "布署": "部署", "按装": "安装",
@@ -109,6 +110,13 @@ RULES = [
     ("bei-passive", "warn",
      BEI,
      "技术说明中少用“被”字句，改主动句（该功能被用于… → 该功能用于…）", "ruanyf text.md"),
+    # 白名单只覆盖 12 个高频动词，「被强调」「被整编」这类一律放过（2026-11-13 记录 A4：
+    # mechanisms.md 里 24 行「被＋汉字」命中 0）。规范口径是「主动语态优先」（分级表第 3 条），
+    # 属优先而非禁止，所以兜底命中降为 hint，不污染 warn 计数。与 bei-passive 同位置不重复报。
+    ("bei-passive-open", "hint",
+     rf"被[{CJK}]{{1,4}}",
+     "「被＋动词」白名单外的形式：多数应改主动句；施事确实无关时可保留",
+     "DSG 写作风格(1) 主动语态优先（漏报兜底，故为 hint）"),
     ("tongguo-shi", "warn",
      rf"通过[^。；\n]{{2,40}}?使[^。；\n]{{1,25}}?(?:能够|可以|得以|得到|更加|更为|实现)",
      "“通过…使…”句式常吞掉主语，检查句子有没有施事", "华为 2.5"),
@@ -201,7 +209,7 @@ RNO = {
     "dash-single": "R-dash", "double-hyphen": "R-dash", "range-unit": "R-range",
     "range-dash": "R-range", "unit-symbol": "R-unit", "unit-prose": "R-unit",
     "multiply-sign": "", "times-decrease": "R-mult", "jinxing-nominal": "R-jinxing",
-    "bei-passive": "R-bei", "tongguo-shi": "R-tongguo", "de-chain": "R-de",
+    "bei-passive": "R-bei", "bei-passive-open": "R-bei", "tongguo-shi": "R-tongguo", "de-chain": "R-de",
     "boilerplate": "C·套话", "fuzzy-word": "B·模糊词", "misprint": "R-word",
     "login-word": "R-word", "colon-pile": "R-colon", "figure-colon": "R-figure",
     "click-word": "E·界面用语", "table-same-as-above": "", "cjk-latin-space": "R-space",
@@ -376,6 +384,33 @@ MASK_RES = [
     # HTML 注释是转录件的结构标记（分页注释、豁免标记），内容不进任何规则（2026-11-13 检查记录 A1）
     re.compile(r"<!--.*?-->"),
 ]
+
+
+# 引号内的内容是被谈论的对象，不是本文的写法。规范文本要引用它禁止的形式
+# （AGENTS.md 写「英语式被动（「被认为是」）」），报告正文会引用受访者原话。
+# 词法级规则不看这些区间（2026-11-13 检查记录 A1）。
+# straight-quote 不在豁免集内：它的命中位置在引号边界上，不在区间里。
+LEX_QUOTE = re.compile(r"「[^」\n]*」|『[^』\n]*』|[“”\"][^”\"\n]*[””\"]|'[^'\n]*'")
+LEX_EXEMPT = {"bei-passive", "bei-passive-open", "boilerplate", "boilerplate-pile",
+              "jinxing-nominal", "tongguo-shi", "de-chain", "colon-pile", "figure-colon",
+              "fuzzy-word", "misprint", "login-word", "click-word"}
+
+# 禁用词清单、规则表这类并列清单：行里的套话是被列举项，不是行文
+# （AGENTS.md:177 一行里并列 8 个禁用词，boilerplate 计 5 次；2026-11-13 检查记录 A3）。
+# 判据落在命中词本身，不落在整行形态：清单常以句号收尾，用「整行无句末标点」会漏掉。
+LIST_EXEMPT = {"boilerplate", "bei-passive", "bei-passive-open", "jinxing-nominal", "fuzzy-word"}
+ENUM_BEFORE = "、：:（("
+
+
+def in_enum(m: str, pos: int, end: int) -> bool:
+    """命中词是否处在顿号并列序列里：紧邻前一个是顿号／冒号／括号，或紧邻后一个是顿号。
+    句子里独立出现的套话（「……较好。综上所述，」）不满足，照常报。"""
+    i = pos - 1
+    while i >= 0 and m[i] == " ":
+        i -= 1
+    prev = m[i] if i >= 0 else ""
+    nxt = m[end] if end < len(m) else ""
+    return prev in ENUM_BEFORE or nxt == "、"
 
 
 TOKEN_RES = re.compile(r"[\u4e00-\u9fff]|[A-Za-z0-9_.\-/]+")
@@ -574,6 +609,11 @@ def check_text(path: str, text: str, min_level: int):
         m = mask_line(raw, extra)
         m = mask_time_colons(m)  # 时间点内部冒号不计入 colon-pile（A3）
         hex_spans = [(h.start(), h.end()) for h in HEX_RUN.finditer(raw)]
+        # raw 与 m 等长（屏蔽是等长替换），所以 raw 上的位置可直接用于 m 上的命中位置。
+        quote_idx = set()
+        for qm in LEX_QUOTE.finditer(raw):
+            quote_idx.update(range(qm.start(), qm.end()))
+        bei_starts = {bm.start() for bm in BEI_RE.finditer(m)}
         if md:
             hm = HEADING.match(raw)
             if hm:
@@ -587,6 +627,8 @@ def check_text(path: str, text: str, min_level: int):
                 para_lines += 1
                 para_chars += width(m)  # 与句长同一口径：拉丁词按 1 计（2026-11-05 修订）
                 for bm in BOILER_RE.finditer(m):
+                    if bm.start() in quote_idx or in_enum(m, bm.start(), bm.end()):
+                        continue  # 引号内与并列清单项不计套话密度（A1、A3）
                     pile.append((i, bm.start() + 1, bm.group(0)))
         else:
             flush_para(i)
@@ -609,6 +651,14 @@ def check_text(path: str, text: str, min_level: int):
             if js_line:  # JS 模板行：引号、连字符、冒号都是代码语法（A5）
                 continue
             for hit in rx.finditer(m):
+                if rid in LEX_EXEMPT and hit.start() in quote_idx:
+                    continue  # 引号内是被引用的对象，不是本文写法（2026-11-13 记录 A1）
+                if rid == "colon-pile" and any(p in quote_idx for p in range(hit.start(), hit.end())):
+                    continue  # 连排的两个冒号只要有一个在引号内，就是引用串内部的冒号（记录 A2）
+                if rid in LIST_EXEMPT and in_enum(m, hit.start(), hit.end()):
+                    continue  # 并列清单项：命中的词是被列举项（记录 A3）
+                if rid == "bei-passive-open" and hit.start() in bei_starts:
+                    continue  # 白名单已按 warn 报过，不再重复（记录 A4）
                 if rid == "range-dash" and skip_range(m, hit):
                     continue
                 if rid == "unit-symbol" and any(s0 <= hit.start() < e0 for s0, e0 in hex_spans):
@@ -786,6 +836,7 @@ def main(argv=None):
         print("口径（2026-11-10 新增）：标题层级规则只跑 .md，跳过 YAML front matter 与代码块；并列逗号按整行构件判定，千分位与 e.g., 不算并列")
         print("口径（2026-11-10 新增）：.py 用 tokenize 抽出 docstring 与注释后只查这些文本；docstring 里半角括号段按代码写法屏蔽；--word 形式的双连字符（CLI 标志、CSS 变量）不算破折号误用")
         print("口径（2026-11-13 新增，来自 11-13 检查记录，原文存仓外不入库）：HTML 注释整块屏蔽；「汉字1～4字—汉字1～4字」同形 ≥3 次视为术语连接号不报 dash-single；纯时间点冒号不报 colon-pile；含 ${ 或 HTML 标签起行的 JS 模板行跳过词法规则；≤6 字无逗号短行视为断段点；单文件默认 >1MB 跳过（--max-file-size）")
+        print("口径（2026-11-13 第二批，来自 research 库检查记录）：「」『』“”与直引号内的内容不参与词法级规则（规范文本会引用它禁止的形式）；顿号 ≥3 且无句末标点的行视为列举清单，boilerplate／bei-passive／jinxing-nominal／fuzzy-word 不计；白名单外的「被＋汉字」由 bei-passive-open 兜底报 hint，与 bei-passive 同位置不重复报")
         return 0
 
     exts = {e.strip() if e.startswith(".") else "." + e.strip() for e in a.ext.split(",")}
@@ -829,6 +880,8 @@ def main(argv=None):
             if len(items) > 12:
                 print(f"  …另 {len(items) - 12} 处")
         print(f"\n扫描 {scanned} 个文件：error {counts['error']}、warn {counts['warn']}、hint {counts['hint']}")
+        print(f"本轮覆盖：只读 {'、'.join(sorted(exts))}；.py 不在目录模式内，要逐个传参"
+              f"（--ext .py,.md 可并入）。读数只说明这些文件里没查出问题，不说明全库合规。")
         if not a.no_residual:
             print("\n" + RESIDUAL)
 
